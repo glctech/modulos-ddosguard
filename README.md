@@ -29,6 +29,15 @@ configura o `ingest.php`, as tabelas auxiliares e o agente coletor
 automaticamente — só os passos feitos pela interface do Zabbix (importar o
 template, habilitar os módulos, montar o dashboard) continuam manuais.
 
+
+
+## Permissões necessárias
+
+
+chown root:apache /etc/zabbix/ddosguard/ingest.config.php
+chmod 640 /etc/zabbix/ddosguard/ingest.config.php
+
+
 ## Estrutura do pacote
 
 ```
