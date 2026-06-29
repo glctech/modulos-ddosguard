@@ -55,8 +55,8 @@ DEFAULT_CONFIG = {
     "general": {
         "zbx_host": socket.gethostname(),
         "hostid": "0",
-        "ingest_url": "http://192.168.0.52/zabbix/ddosguard/ingest.php",
-        "ingest_token": "51c503378add5f8a2f2a3fbc4eed34209d73b24cab0fe01d6239a0b6c25e3c75",
+        "ingest_url": "http://127.0.0.1/zabbix/ddosguard/ingest.php",
+        "ingest_token": "fec640fb888b572d0c2da1b6a5963123781bf011cb798c0f5581b19e3131846b",
         "poll_interval": "10",            # segundos entre leituras dos logs
         "aggregate_window": "60",         # segundos para agregar contagem de tentativas/IP
         "geoip_db_path": "/usr/share/GeoIP/GeoLite2-City.mmdb",

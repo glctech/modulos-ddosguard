@@ -17,8 +17,26 @@
  * serviço PHP simples (php -S ou atrás do mesmo Apache/Nginx do
  * frontend do Zabbix, em /usr/share/zabbix/ddosguard/ingest.php).
  *
- * Configuração: edite as constantes abaixo ou exporte variáveis de
- * ambiente DG_DB_*, DG_ZBX_SERVER, DG_ZBX_PORT, DG_INGEST_TOKEN.
+ * Configuração: existem duas formas, e a primeira tem prioridade sobre
+ * a segunda:
+ *
+ *   1) Arquivo de config PHP local (recomendado para appliances, onde
+ *      configurar variável de ambiente no Nginx/PHP-FPM é mais
+ *      trabalhoso): crie /etc/zabbix/ddosguard/ingest.config.php
+ *      retornando um array associativo, por exemplo:
+ *
+ *          <?php
+ *          return [
+ *              'DG_INGEST_TOKEN' => 'seu_token_aqui',
+ *              'DG_DB_HOST'      => '127.0.0.1',
+ *              'DG_DB_NAME'      => 'zabbix',
+ *              'DG_DB_USER'      => 'zabbix',
+ *              'DG_DB_PASS'      => 'sua_senha',
+ *          ];
+ *
+ *   2) Variáveis de ambiente DG_DB_*, DG_ZBX_SERVER, DG_ZBX_PORT,
+ *      DG_INGEST_TOKEN (via SetEnv no Apache ou fastcgi_param + env[]
+ *      no PHP-FPM, se o Nginx estiver na frente).
  */
 
 declare(strict_types=1);
@@ -27,20 +45,45 @@ header('Content-Type: application/json; charset=utf-8');
 // ---------------------------------------------------------------------
 // Configuração
 // ---------------------------------------------------------------------
-$DB_HOST   = getenv('DG_DB_HOST')   ?: '127.0.0.1';
-$DB_PORT   = getenv('DG_DB_PORT')   ?: '3306';
-$DB_NAME   = getenv('DG_DB_NAME')   ?: 'zabbix';
-$DB_USER   = getenv('DG_DB_USER')   ?: 'zabbix';
-$DB_PASS   = getenv('DG_DB_PASS')   ?: 'zabbix';
-$DB_DRIVER = getenv('DG_DB_DRIVER') ?: 'mysql'; // mysql | pgsql
 
-$ZBX_SENDER_BIN = getenv('DG_ZABBIX_SENDER_BIN') ?: '/usr/bin/zabbix_sender';
-$ZBX_SERVER     = getenv('DG_ZBX_SERVER') ?: '127.0.0.1';
-$ZBX_PORT       = getenv('DG_ZBX_PORT')   ?: '10051';
+// Caminho do arquivo de config local. Pode ser sobrescrito definindo a
+// env DG_CONFIG_FILE, caso queira colocar em outro lugar.
+$CONFIG_FILE = getenv('DG_CONFIG_FILE') ?: '/etc/zabbix/ddosguard/ingest.config.php';
+
+$file_config = [];
+if (is_file($CONFIG_FILE) && is_readable($CONFIG_FILE)) {
+    $loaded = include $CONFIG_FILE;
+    if (is_array($loaded)) {
+        $file_config = $loaded;
+    }
+}
+
+/**
+ * Lê uma config: primeiro do arquivo local (se a chave existir e não for
+ * vazia), depois da variável de ambiente, depois do valor padrão.
+ */
+function dg_config(array $file_config, string $key, string $default): string {
+    if (array_key_exists($key, $file_config) && $file_config[$key] !== '') {
+        return (string) $file_config[$key];
+    }
+    $env = getenv($key);
+    return ($env !== false && $env !== '') ? $env : $default;
+}
+
+$DB_HOST   = dg_config($file_config, 'DG_DB_HOST', '127.0.0.1');
+$DB_PORT   = dg_config($file_config, 'DG_DB_PORT', '3306');
+$DB_NAME   = dg_config($file_config, 'DG_DB_NAME', 'zabbix');
+$DB_USER   = dg_config($file_config, 'DG_DB_USER', 'zabbix');
+$DB_PASS   = dg_config($file_config, 'DG_DB_PASS', 'zabbix');
+$DB_DRIVER = dg_config($file_config, 'DG_DB_DRIVER', 'mysql'); // mysql | pgsql
+
+$ZBX_SENDER_BIN = dg_config($file_config, 'DG_ZABBIX_SENDER_BIN', '/usr/bin/zabbix_sender');
+$ZBX_SERVER     = dg_config($file_config, 'DG_ZBX_SERVER', '127.0.0.1');
+$ZBX_PORT       = dg_config($file_config, 'DG_ZBX_PORT', '10051');
 
 // Token simples para autenticar o agente (defina o mesmo valor no
 // ddos_guard_agent.py / ddos_guard_agent.conf).
-$INGEST_TOKEN = getenv('DG_INGEST_TOKEN') ?: 'CHANGE_ME_TOKEN';
+$INGEST_TOKEN = dg_config($file_config, 'DG_INGEST_TOKEN', 'CHANGE_ME_TOKEN');
 
 // ---------------------------------------------------------------------
 // Helpers

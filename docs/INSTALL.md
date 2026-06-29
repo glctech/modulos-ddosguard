@@ -37,6 +37,46 @@ sozinho, em tempo real, sem precisar de nenhuma extensão de navegador.
 
 ---
 
+## Atalho — setup automático (recomendado)
+
+Em vez de seguir manualmente os passos 3 a 7 abaixo, você pode rodar o
+assistente interativo `scripts/setup.py`, que detecta o ambiente (appliance
+oficial, Apache ou Nginx + PHP-FPM, MySQL ou PostgreSQL) e configura tudo:
+cria as tabelas auxiliares, gera um token seguro, publica o `ingest.php` no
+lugar certo, escreve `ingest.config.php`, e opcionalmente já instala e
+habilita o agente coletor neste host via systemd.
+
+```bash
+# Rode como root (ou root via sudo) na máquina que serve o frontend do Zabbix.
+cd zbx_ddos_guard
+python3 scripts/setup.py
+```
+
+Funciona só com a biblioteca padrão do Python 3 — não precisa de `pip`. Outras opções úteis:
+
+```bash
+# Aceita todos os valores detectados/sugeridos automaticamente, sem perguntar nada:
+python3 scripts/setup.py --yes
+
+# Simula a execução sem alterar nada no sistema (mostra o que faria):
+python3 scripts/setup.py --dry-run
+
+# Pula os testes de conexão com banco / endpoint HTTP (útil se ainda
+# não tiver rede liberada para esse teste):
+python3 scripts/setup.py --skip-db-test --skip-endpoint-test
+```
+
+No final ele imprime um resumo com os caminhos gerados, a URL do `ingest.php`
+e o token criado. Ainda assim, **os passos 2 (importar o template), 6 (habilitar
+os módulos de frontend pelo Administration > General > Modules) e 7 (montar o
+dashboard) precisam ser feitos pela interface do Zabbix** — o script não
+substitui isso, só automatiza a parte de infraestrutura/arquivos.
+
+Se preferir configurar manualmente passo a passo (ou entender o que o script
+faz por debaixo dos panos), siga as seções abaixo.
+
+---
+
 ## 2. Instalar o template no Zabbix
 
 1. No frontend: **Data collection → Templates → Import**.
@@ -73,10 +113,10 @@ mysql -u zabbix -p zabbix < sql/schema.sql
    roda (`apt install zabbix-sender` / `yum install zabbix-sender`).
 4. Teste o endpoint:
    ```bash
-   curl -X POST http://192.168.0.52/ddosguard/ingest.php \
-     -H "X-DG-Token: 51c503378add5f8a2f2a3fbc4eed34209d73b24cab0fe01d6239a0b6c25e3c75" \
+   curl -X POST http://SEU_SERVIDOR/zabbix/ddosguard/ingest.php \
+     -H "X-DG-Token: CHANGE_ME_TOKEN" \
      -H "Content-Type: application/json" \
-     -d '{"event_type":"heartbeat","zbx_host":"appliance","hostid":10084}'
+     -d '{"event_type":"heartbeat","zbx_host":"meu-servidor-web-01","hostid":10500}'
    ```
    Resposta esperada: `{"ok":true}`
 

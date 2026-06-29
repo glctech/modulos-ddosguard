@@ -17,7 +17,17 @@ em tempo real, ataques DDoS / força bruta / malware, mostrando:
   via `scripts/provision_dashboard.py`, já que esse tipo de dashboard não é
   importável por arquivo no Zabbix).
 
-Veja o passo a passo completo em **[`docs/INSTALL.md`](docs/INSTALL.md)**.
+Veja o passo a passo completo em **[`docs/INSTALL.md`](docs/INSTALL.md)** —
+ou, se quiser pular direto para a configuração, rode o assistente interativo:
+
+```bash
+python3 scripts/setup.py
+```
+
+Ele detecta o ambiente (appliance oficial, Apache/Nginx, MySQL/PostgreSQL) e
+configura o `ingest.php`, as tabelas auxiliares e o agente coletor
+automaticamente — só os passos feitos pela interface do Zabbix (importar o
+template, habilitar os módulos, montar o dashboard) continuam manuais.
 
 ## Estrutura do pacote
 
@@ -32,7 +42,8 @@ zbx_ddos_guard/
 │   ├── ddos_guard_agent.py           # Agente coletor (lê logs em tempo real)
 │   ├── ddos_guard_agent.conf.example # Configuração de exemplo do agente
 │   ├── ddos-guard-agent.service      # Unit systemd do agente
-│   └── provision_dashboard.py        # Cria o dashboard em Monitoring > Dashboards via API
+│   ├── provision_dashboard.py        # Cria o dashboard em Monitoring > Dashboards via API
+│   └── setup.py                      # Assistente interativo de configuração (recomendado)
 ├── modules/
 │   ├── DDoSAttackMonitor/            # Widget de dashboard: painel de ataques
 │   └── DDoSBlockMonitor/             # Widget de dashboard: painel de bloqueios
