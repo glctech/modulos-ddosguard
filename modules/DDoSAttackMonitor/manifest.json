@@ -1,0 +1,31 @@
+{
+	"manifest_version": 2.0,
+	"id": "ddosattackmonitor",
+	"type": "widget",
+	"name": "DDoS Guard - Attack Monitor",
+	"namespace": "DDoSAttackMonitor",
+	"version": "1.0.0",
+	"author": "DDoS Guard",
+	"description": "Painel em tempo real com os ataques detectados: IP de origem, país, tipo de ataque, porta/protocolo, quantidade de tentativas e status de firewall/antivírus do host.",
+	"url": "",
+	"widget": {
+		"size": {
+			"width": 72,
+			"height": 6
+		},
+		"in": {
+			"hostids": {
+				"type": "_hostids"
+			},
+			"groupids": {
+				"type": "_hostgroupids"
+			}
+		},
+		"out": []
+	},
+	"actions": {
+		"widget.ddosattackmonitor.view": {
+			"class": "WidgetView"
+		}
+	}
+}

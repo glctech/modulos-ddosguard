@@ -1,0 +1,31 @@
+{
+	"manifest_version": 2.0,
+	"id": "ddosblockmonitor",
+	"type": "widget",
+	"name": "DDoS Guard - Block Monitor (Firewall & Antivírus)",
+	"namespace": "DDoSBlockMonitor",
+	"version": "1.0.0",
+	"author": "DDoS Guard",
+	"description": "Painel em tempo real mostrando os bloqueios realizados pelo firewall e pelo antivírus: IP de origem, país, regra/assinatura, e contadores comparativos.",
+	"url": "",
+	"widget": {
+		"size": {
+			"width": 72,
+			"height": 6
+		},
+		"in": {
+			"hostids": {
+				"type": "_hostids"
+			},
+			"groupids": {
+				"type": "_hostgroupids"
+			}
+		},
+		"out": []
+	},
+	"actions": {
+		"widget.ddosblockmonitor.view": {
+			"class": "WidgetView"
+		}
+	}
+}

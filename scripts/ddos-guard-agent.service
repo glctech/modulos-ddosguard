@@ -1,0 +1,14 @@
+[Unit]
+Description=DDoS Guard Agent - coletor de eventos de seguranca para Zabbix
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/zabbix/ddosguard/ddos_guard_agent.py --config /etc/zabbix/ddos_guard_agent.conf
+Restart=always
+RestartSec=5
+User=zabbix
+Group=zabbix
+
+[Install]
+WantedBy=multi-user.target

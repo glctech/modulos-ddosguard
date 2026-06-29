@@ -1,0 +1,43 @@
+# ===========================================================
+# DDoS Guard Agent - arquivo de configuração
+# Copie para /etc/zabbix/ddos_guard_agent.conf e ajuste os valores.
+# ===========================================================
+
+[general]
+# Nome do host EXATAMENTE como está cadastrado no Zabbix (Configuration > Hosts).
+zbx_host = meu-servidor-web-01
+
+# ID numérico do host no Zabbix (Data Collection > Hosts > clique no host > veja a URL "hostid=").
+# Usado apenas para popular as tabelas auxiliares do dashboard (filtros por host).
+hostid = 10500
+
+# URL do endpoint ingest.php (ver scripts/ingest.php). Normalmente publicado
+# no mesmo servidor do frontend do Zabbix.
+ingest_url = http://127.0.0.1/zabbix/ddosguard/ingest.php
+
+# Token de autenticação - deve ser IDÊNTICO ao configurado em ingest.php (DG_INGEST_TOKEN).
+ingest_token = CHANGE_ME_TOKEN
+
+# Intervalo (segundos) entre cada leitura dos logs. 10s = quase tempo real.
+poll_interval = 10
+
+# Janela (segundos) de agregação de tentativas por IP/tipo de ataque antes de enviar.
+aggregate_window = 60
+
+# Caminho da base local GeoLite2-City (gratuita, da MaxMind). Se não existir
+# e a lib 'geoip2' não estiver instalada, o agente usa a API pública ip-api.com.
+geoip_db_path = /usr/share/GeoIP/GeoLite2-City.mmdb
+
+# yes/no/auto - "auto" tenta detectar automaticamente (iptables/ufw ativo? clamd rodando?)
+has_firewall = auto
+has_antivirus = auto
+
+state_file = /var/lib/zabbix/ddosguard/state.json
+
+[sources]
+# Ajuste os caminhos conforme sua distro. Deixe vazio para desabilitar uma fonte.
+iptables_log = /var/log/kern.log
+ufw_log = /var/log/ufw.log
+fail2ban_log = /var/log/fail2ban.log
+clamav_log = /var/log/clamav/clamav.log
+auth_log = /var/log/auth.log
