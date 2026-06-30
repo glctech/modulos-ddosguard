@@ -3,35 +3,50 @@
 """
 DDoS Guard Agent
 ================
-Coletor que roda no host monitorado (ou em um coletor central que
-recebe logs via syslog) e detecta, em tempo real:
+Coletor multiplataforma (Linux e Windows) que roda no host monitorado e
+detecta, em tempo real:
 
-  - Ataques de força bruta / flood (varrendo logs de firewall:
-    iptables, ufw, nftables, fail2ban)
-  - Detecções/bloqueios de antivírus (ClamAV - clamd.log / freshclam,
-    ou qualquer ferramenta que escreva em log texto)
-  - Geolocalização do IP de origem (GeoIP2 local, com fallback para
-    API pública ip-api.com se a base local não estiver disponível)
+  No Linux:
+    - Ataques de força bruta / flood (varrendo logs de firewall:
+      iptables, ufw, nftables, fail2ban)
+    - Detecções/bloqueios de antivírus (ClamAV - clamd.log, ou qualquer
+      ferramenta que escreva em log texto)
+
+  No Windows:
+    - Bloqueios do Windows Firewall (Event Log "Security", IDs 5152/5157
+      - Windows Filtering Platform) e tentativas de logon falhadas /
+      RDP brute-force (Event ID 4625)
+    - Detecções do Windows Defender (Event Log "Microsoft-Windows-
+      Windows Defender/Operational", IDs 1116/1117)
+
+  Em ambos:
+    - Geolocalização do IP de origem (GeoIP2 local, com fallback para
+      API pública ip-api.com se a base local não estiver disponível)
 
 E envia tudo para o endpoint ingest.php (ver scripts/ingest.php), que
 grava no banco usado pelos widgets do dashboard e replica os
 contadores para o Zabbix via zabbix_sender.
 
 Uso:
-    python3 ddos_guard_agent.py --config /etc/zabbix/ddos_guard_agent.conf
+    python3 ddos_guard_agent.py --config /etc/zabbix/ddos_guard_agent.conf      (Linux)
+    python  ddos_guard_agent.py --config C:\\ProgramData\\DDoSGuard\\agent.conf  (Windows)
 
-Pode ser executado como serviço systemd (recomendado, ver
-docs/INSTALL.md) ou via cron a cada minuto com --once.
+Pode ser executado como serviço systemd no Linux (ver
+scripts/install_agent_linux.sh) ou como serviço do Windows via NSSM
+(ver scripts/install_agent_windows.ps1), ou ainda manualmente com
+--once para uso via cron / Agendador de Tarefas.
 
 Dependências opcionais:
-    pip install geoip2      # para geolocalização local (mais rápida, sem rate-limit)
-    (sem geoip2 instalado, o agente usa a API pública ip-api.com)
+    pip install geoip2       # geolocalização local (mais rápida, sem rate-limit)
+    pip install pywin32      # OBRIGATÓRIO no Windows, para ler o Event Log
+    (sem geoip2, o agente usa a API pública ip-api.com)
 """
 
 import argparse
 import configparser
 import json
 import os
+import platform
 import re
 import socket
 import sys
@@ -41,35 +56,59 @@ import urllib.error
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 
+IS_WINDOWS = platform.system() == "Windows"
+
 try:
     import geoip2.database
     HAS_GEOIP2 = True
 except ImportError:
     HAS_GEOIP2 = False
 
+HAS_WIN32EVTLOG = False
+if IS_WINDOWS:
+    try:
+        import win32evtlog
+        import win32evtlogutil
+        import win32con
+        HAS_WIN32EVTLOG = True
+    except ImportError:
+        HAS_WIN32EVTLOG = False
+
 
 # ---------------------------------------------------------------------
 # Configuração
 # ---------------------------------------------------------------------
+if IS_WINDOWS:
+    _DEFAULT_STATE_FILE = r"C:\ProgramData\DDoSGuard\state.json"
+    _DEFAULT_GEOIP_PATH = r"C:\ProgramData\DDoSGuard\GeoLite2-City.mmdb"
+else:
+    _DEFAULT_STATE_FILE = "/var/lib/zabbix/ddosguard/state.json"
+    _DEFAULT_GEOIP_PATH = "/usr/share/GeoIP/GeoLite2-City.mmdb"
+
 DEFAULT_CONFIG = {
     "general": {
         "zbx_host": socket.gethostname(),
         "hostid": "0",
-        "ingest_url": "http://127.0.0.1/zabbix/ddosguard/ingest.php",
+        "ingest_url": "http://127.0.0.1/ddosguard/ingest.php",
         "ingest_token": "CHANGE_ME_TOKEN",
         "poll_interval": "10",            # segundos entre leituras dos logs
         "aggregate_window": "60",         # segundos para agregar contagem de tentativas/IP
-        "geoip_db_path": "/usr/share/GeoIP/GeoLite2-City.mmdb",
+        "geoip_db_path": _DEFAULT_GEOIP_PATH,
         "has_firewall": "auto",           # auto | yes | no
         "has_antivirus": "auto",
-        "state_file": "/var/lib/zabbix/ddosguard/state.json",
+        "state_file": _DEFAULT_STATE_FILE,
     },
     "sources": {
+        # --- Linux ---
         "iptables_log": "/var/log/kern.log",      # log onde aparecem linhas "iptables denied"
         "ufw_log": "/var/log/ufw.log",
         "fail2ban_log": "/var/log/fail2ban.log",
         "clamav_log": "/var/log/clamav/clamav.log",
         "auth_log": "/var/log/auth.log",          # tentativas de SSH brute force
+        # --- Windows (Event Log, não são caminhos de arquivo) ---
+        "windows_security_log": "Security",                                   # logon falhado / RDP brute-force
+        "windows_firewall_log": "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall",
+        "windows_defender_log": "Microsoft-Windows-Windows Defender/Operational",
     },
 }
 
@@ -174,6 +213,81 @@ class LogTailer:
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
+class WindowsEventLogReader:
+    """Lê novos eventos de um canal do Windows Event Log de forma
+    incremental (equivalente ao LogTailer, mas usando a API nativa do
+    Windows via pywin32 em vez de arquivo de texto).
+
+    Guarda o RecordNumber do último evento lido para não reprocessar
+    eventos antigos a cada ciclo.
+    """
+
+    def __init__(self, channel, event_ids=None):
+        self.channel = channel
+        self.event_ids = set(event_ids) if event_ids else None
+        self._last_record_number = None
+        self._available = HAS_WIN32EVTLOG
+
+    def read_new_events(self):
+        if not self._available or not self.channel:
+            return []
+
+        events = []
+        try:
+            handle = win32evtlog.OpenEventLog(None, self.channel)
+        except Exception as e:
+            log(f"Não foi possível abrir o canal de log '{self.channel}': {e}")
+            return []
+
+        try:
+            flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+            collected = []
+            while True:
+                records = win32evtlog.ReadEventLog(handle, flags, 0)
+                if not records:
+                    break
+                stop = False
+                for record in records:
+                    if self._last_record_number is not None and record.RecordNumber <= self._last_record_number:
+                        stop = True
+                        break
+                    collected.append(record)
+                if stop:
+                    break
+                # Limite de segurança: evita processar um histórico gigante
+                # na primeira execução (ex.: log de Security com milhões de
+                # eventos antigos). Pega só os mais recentes.
+                if len(collected) >= 2000:
+                    break
+
+            if collected:
+                # Veio em ordem "mais novo -> mais antigo"; processa em
+                # ordem cronológica e atualiza o marcador para o mais novo.
+                collected.reverse()
+                self._last_record_number = collected[-1].RecordNumber
+                for record in collected:
+                    if self.event_ids and (record.EventID & 0xFFFF) not in self.event_ids:
+                        continue
+                    try:
+                        message = win32evtlogutil.SafeFormatMessage(record, self.channel)
+                    except Exception:
+                        message = " ".join(str(s) for s in (record.StringInserts or []))
+                    events.append({
+                        "event_id": record.EventID & 0xFFFF,
+                        "time_generated": record.TimeGenerated,
+                        "message": message or "",
+                    })
+        except Exception as e:
+            log(f"Erro lendo eventos de '{self.channel}': {e}")
+        finally:
+            try:
+                win32evtlog.CloseEventLog(handle)
+            except Exception:
+                pass
+
+        return events
+
+
 def extract_ip(line):
     # Prioriza padrões "SRC=x.x.x.x" (iptables) e "from x.x.x.x" (sshd/fail2ban).
     m = re.search(r"SRC=(\d{1,3}(?:\.\d{1,3}){3})", line)
@@ -252,13 +366,26 @@ class DDoSGuardAgent:
         self.geo = GeoResolver(g["geoip_db_path"])
         self.ingest = IngestClient(g["ingest_url"], g["ingest_token"])
 
-        self.tailers = {
-            "iptables": LogTailer(s.get("iptables_log")),
-            "ufw": LogTailer(s.get("ufw_log")),
-            "fail2ban": LogTailer(s.get("fail2ban_log")),
-            "clamav": LogTailer(s.get("clamav_log")),
-            "auth": LogTailer(s.get("auth_log")),
-        }
+        if IS_WINDOWS:
+            if not HAS_WIN32EVTLOG:
+                log("AVISO: pacote 'pywin32' não encontrado. Instale com "
+                    "'pip install pywin32' para o agente conseguir ler o "
+                    "Event Log do Windows (Firewall, Defender, logons).")
+            # Event ID 4625 = falha de logon (RDP/SMB/local brute-force).
+            self.win_security = WindowsEventLogReader(s.get("windows_security_log"), event_ids=[4625])
+            # Event IDs 5152/5157 = Windows Filtering Platform bloqueou um pacote/conexão.
+            self.win_firewall = WindowsEventLogReader(s.get("windows_firewall_log"), event_ids=[5152, 5157])
+            # Event IDs 1116 (detecção) / 1117 (ação tomada) do Windows Defender.
+            self.win_defender = WindowsEventLogReader(s.get("windows_defender_log"), event_ids=[1116, 1117])
+            self.tailers = {}
+        else:
+            self.tailers = {
+                "iptables": LogTailer(s.get("iptables_log")),
+                "ufw": LogTailer(s.get("ufw_log")),
+                "fail2ban": LogTailer(s.get("fail2ban_log")),
+                "clamav": LogTailer(s.get("clamav_log")),
+                "auth": LogTailer(s.get("auth_log")),
+            }
 
         # agregação em memória: (src_ip, attack_type) -> dados
         self._agg = defaultdict(lambda: {
@@ -376,13 +503,114 @@ class DDoSGuardAgent:
                 "timestamp": ts,
             })
 
+    # -------------------- detecção Windows: logon falhado / RDP brute-force --------------------
+    def _process_windows_security_events(self, events):
+        for ev in events:
+            if ev["event_id"] != 4625:
+                continue
+            ip = extract_ip(ev["message"])
+            ts = now_ts()
+            # IPs locais/loopback em logon falhado não são interessantes
+            # (geralmente o próprio serviço testando credenciais).
+            if not ip or ip.startswith(("127.", "0.0.0.0")):
+                ip = ip or "0.0.0.0"
+
+            key = (ip, "BRUTE_FORCE_RDP")
+            agg = self._agg[key]
+            agg["attempts"] += 1
+            agg["last_seen"] = ts
+            agg["first_seen"] = agg["first_seen"] or ts
+            agg["source"] = "windows_security"
+            self._distinct_ips_window.append((ts, ip))
+
+    # -------------------- detecção Windows: Firewall bloqueou conexão --------------------
+    def _process_windows_firewall_events(self, events):
+        for ev in events:
+            if ev["event_id"] not in (5152, 5157):
+                continue
+            ip = extract_ip(ev["message"])
+            if not ip:
+                continue
+            ts = now_ts()
+
+            port, proto = None, None
+            m = re.search(r"Source Port:\s*(\d+)", ev["message"])
+            if not m:
+                m = re.search(r"\bSPT\s*[:=]\s*(\d+)", ev["message"])
+            if m:
+                port = int(m.group(1))
+            m = re.search(r"Protocol:\s*(\d+)", ev["message"])
+            if m:
+                proto_num = m.group(1)
+                proto = {"6": "TCP", "17": "UDP", "1": "ICMP"}.get(proto_num, proto_num)
+
+            key = (ip, "SUSPICIOUS_TRAFFIC")
+            agg = self._agg[key]
+            agg["attempts"] += 1
+            agg["last_seen"] = ts
+            agg["first_seen"] = agg["first_seen"] or ts
+            agg["target_port"] = port or agg["target_port"]
+            agg["protocol"] = proto or agg["protocol"]
+            agg["source"] = "windows_firewall"
+            self._distinct_ips_window.append((ts, ip))
+
+            geo = self.geo.resolve(ip)
+            self.ingest.send("block_firewall", self.zbx_host, self.hostid, {
+                "src_ip": ip,
+                "country": geo["country"],
+                "country_name": geo["country_name"],
+                "tool": "windows_firewall",
+                "rule": ev["message"][-200:],
+                "target_port": port,
+                "protocol": proto,
+                "reason": f"event_id_{ev['event_id']}",
+                "timestamp": ts,
+            })
+
+    # -------------------- detecção Windows: Defender --------------------
+    def _process_windows_defender_events(self, events):
+        for ev in events:
+            if ev["event_id"] not in (1116, 1117):
+                continue
+            message = ev["message"]
+            ts = now_ts()
+
+            malware = "Unknown threat"
+            m = re.search(r"Name:\s*(.+)", message)
+            if m:
+                malware = m.group(1).split("\n")[0].strip()
+
+            file_path = None
+            m = re.search(r"Path:\s*(.+)", message)
+            if m:
+                file_path = m.group(1).split("\n")[0].strip()
+
+            ip = extract_ip(message)
+            geo = self.geo.resolve(ip) if ip else {"country": None, "country_name": None}
+
+            self.ingest.send("block_antivirus", self.zbx_host, self.hostid, {
+                "src_ip": ip or "127.0.0.1",
+                "country": geo["country"],
+                "country_name": geo["country_name"],
+                "tool": "windows_defender",
+                "malware": malware,
+                "action": "detected" if ev["event_id"] == 1116 else "actioned",
+                "file": file_path,
+                "timestamp": ts,
+            })
+
     # -------------------- ciclo principal --------------------
     def poll_once(self):
-        self._process_firewall_lines("iptables", self.tailers["iptables"].read_new_lines())
-        self._process_firewall_lines("ufw", self.tailers["ufw"].read_new_lines())
-        self._process_fail2ban_lines(self.tailers["fail2ban"].read_new_lines())
-        self._process_auth_lines(self.tailers["auth"].read_new_lines())
-        self._process_clamav_lines(self.tailers["clamav"].read_new_lines())
+        if IS_WINDOWS:
+            self._process_windows_security_events(self.win_security.read_new_events())
+            self._process_windows_firewall_events(self.win_firewall.read_new_events())
+            self._process_windows_defender_events(self.win_defender.read_new_events())
+        else:
+            self._process_firewall_lines("iptables", self.tailers["iptables"].read_new_lines())
+            self._process_firewall_lines("ufw", self.tailers["ufw"].read_new_lines())
+            self._process_fail2ban_lines(self.tailers["fail2ban"].read_new_lines())
+            self._process_auth_lines(self.tailers["auth"].read_new_lines())
+            self._process_clamav_lines(self.tailers["clamav"].read_new_lines())
 
         self._flush_aggregates()
         self._send_distinct_ip_count()
@@ -442,16 +670,24 @@ def load_config(path):
 
 
 def main():
+    default_config_path = (
+        r"C:\ProgramData\DDoSGuard\agent.conf" if IS_WINDOWS
+        else "/etc/zabbix/ddos_guard_agent.conf"
+    )
     ap = argparse.ArgumentParser(description="DDoS Guard Agent - coletor de eventos de segurança para Zabbix")
-    ap.add_argument("--config", default="/etc/zabbix/ddos_guard_agent.conf")
-    ap.add_argument("--once", action="store_true", help="Executa um único ciclo de coleta e sai (uso via cron).")
+    ap.add_argument("--config", default=default_config_path)
+    ap.add_argument("--once", action="store_true", help="Executa um único ciclo de coleta e sai (uso via cron / Agendador de Tarefas).")
     args = ap.parse_args()
+
+    if IS_WINDOWS and not HAS_WIN32EVTLOG:
+        log("ERRO: este agente precisa do pacote 'pywin32' para rodar no Windows. "
+            "Instale com: pip install pywin32")
 
     cfg = load_config(args.config)
     agent = DDoSGuardAgent(cfg)
     interval = int(cfg["general"]["poll_interval"])
 
-    log("DDoS Guard Agent iniciado.")
+    log(f"DDoS Guard Agent iniciado ({platform.system()}).")
     if args.once:
         agent.poll_once()
         return

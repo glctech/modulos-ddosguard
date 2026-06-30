@@ -1,7 +1,7 @@
 # DDoS Guard — Detecção de DDoS, Firewall & Antivírus para Zabbix 7.4.11
 
-Módulo completo (template + agente coletor + API + dashboard) para detectar,
-em tempo real, ataques DDoS / força bruta / malware, mostrando:
+Módulo completo (template + agente coletor multiplataforma + API + dashboard)
+para detectar, em tempo real, ataques DDoS / força bruta / malware, mostrando:
 
 - **Painel "Attack Monitor"**: IP de origem, país, tipo de ataque,
   porta/protocolo, quantidade de tentativas, severidade, se foi bloqueado, e
@@ -16,9 +16,14 @@ em tempo real, ataques DDoS / força bruta / malware, mostrando:
   como **dashboard geral** em Monitoring → Dashboards (criado com 1 comando
   via `scripts/provision_dashboard.py`, já que esse tipo de dashboard não é
   importável por arquivo no Zabbix).
+- **Agente coletor para Linux e Windows**, cada um com instalador dedicado
+  (`install_agent_linux.sh` / `install_agent_windows.ps1`). No Linux lê
+  iptables/UFW/fail2ban/ClamAV/auth.log; no Windows lê o Event Log nativo
+  (RDP brute-force, Windows Firewall, Windows Defender).
 
 Veja o passo a passo completo em **[`docs/INSTALL.md`](docs/INSTALL.md)** —
-ou, se quiser pular direto para a configuração, rode o assistente interativo:
+ou, se quiser pular direto para a configuração do servidor, rode o
+assistente interativo:
 
 ```bash
 python3 scripts/setup.py
@@ -39,11 +44,13 @@ zbx_ddos_guard/
 │   └── schema.sql                    # Tabelas auxiliares (ataques, bloqueios, status)
 ├── scripts/
 │   ├── ingest.php                    # API que recebe eventos e alimenta DB + Zabbix
-│   ├── ddos_guard_agent.py           # Agente coletor (lê logs em tempo real)
+│   ├── ddos_guard_agent.py           # Agente coletor multiplataforma (Linux e Windows)
 │   ├── ddos_guard_agent.conf.example # Configuração de exemplo do agente
-│   ├── ddos-guard-agent.service      # Unit systemd do agente
+│   ├── ddos-guard-agent.service      # Unit systemd do agente (Linux)
+│   ├── install_agent_linux.sh        # Instalador dedicado do agente (Linux)
+│   ├── install_agent_windows.ps1     # Instalador dedicado do agente (Windows)
 │   ├── provision_dashboard.py        # Cria o dashboard em Monitoring > Dashboards via API
-│   └── setup.py                      # Assistente interativo de configuração (recomendado)
+│   └── setup.py                      # Assistente interativo de configuração do servidor
 ├── modules/
 │   ├── DDoSAttackMonitor/            # Widget de dashboard: painel de ataques
 │   └── DDoSBlockMonitor/             # Widget de dashboard: painel de bloqueios

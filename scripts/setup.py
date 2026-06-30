@@ -896,7 +896,8 @@ def _install_agent_and_service(dry_run):
     if dry_run:
         info(f"[dry-run] copiaria {source_agent} -> {dest_agent}")
         info(f"[dry-run] copiaria {source_service} -> {dest_service}")
-        info("[dry-run] rodaria: systemctl daemon-reload && systemctl enable --now ddos-guard-agent")
+        info("[dry-run] rodaria: systemctl daemon-reload && systemctl enable ddos-guard-agent "
+             "&& systemctl restart ddos-guard-agent")
         return
 
     if not os.path.exists(source_agent):
@@ -913,12 +914,19 @@ def _install_agent_and_service(dry_run):
         ok(f"Unit systemd copiada para {dest_service}")
         try:
             subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=10)
-            subprocess.run(["systemctl", "enable", "--now", "ddos-guard-agent"], check=True, timeout=10)
-            ok("Serviço ddos-guard-agent habilitado e iniciado.")
+            subprocess.run(["systemctl", "enable", "ddos-guard-agent"], check=True, timeout=10)
+            # IMPORTANTE: usa "restart", não "enable --now" / "start". Se o
+            # serviço já estava rodando de uma execução anterior do setup.py,
+            # "start" é um no-op e o processo continua com a config antiga em
+            # memória (o agente só lê o .conf uma vez, no início). "restart"
+            # garante que a configuração recém-gravada (token, host, etc.)
+            # seja efetivamente recarregada.
+            subprocess.run(["systemctl", "restart", "ddos-guard-agent"], check=True, timeout=10)
+            ok("Serviço ddos-guard-agent habilitado e (re)iniciado com a configuração atual.")
         except subprocess.CalledProcessError as e:
-            err(f"Falha ao habilitar o serviço: {e}")
+            err(f"Falha ao habilitar/reiniciar o serviço: {e}")
         except FileNotFoundError:
-            warn("systemctl não encontrado — habilite o serviço manualmente neste sistema.")
+            warn("systemctl não encontrado — habilite/reinicie o serviço manualmente neste sistema.")
     else:
         warn(f"Não encontrei {source_service} — crie/habilite o serviço systemd manualmente.")
 

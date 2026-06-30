@@ -40,11 +40,11 @@ sozinho, em tempo real, sem precisar de nenhuma extensão de navegador.
 ## Atalho — setup automático (recomendado)
 
 Em vez de seguir manualmente os passos 3 a 7 abaixo, você pode rodar o
-assistente interativo `scripts/setup.py`, que detecta o ambiente (appliance
-oficial, Apache ou Nginx + PHP-FPM, MySQL ou PostgreSQL) e configura tudo:
-cria as tabelas auxiliares, gera um token seguro, publica o `ingest.php` no
-lugar certo, escreve `ingest.config.php`, e opcionalmente já instala e
-habilita o agente coletor neste host via systemd.
+assistente interativo `scripts/setup.py` **na máquina que serve o frontend
+do Zabbix** (o appliance, ou o servidor com Apache/Nginx). Ele detecta o
+ambiente e configura a parte de **servidor**: cria as tabelas auxiliares,
+gera um token seguro, publica o `ingest.php` no lugar certo e escreve o
+`ingest.config.php`.
 
 ```bash
 # Rode como root (ou root via sudo) na máquina que serve o frontend do Zabbix.
@@ -66,11 +66,19 @@ python3 scripts/setup.py --dry-run
 python3 scripts/setup.py --skip-db-test --skip-endpoint-test
 ```
 
-No final ele imprime um resumo com os caminhos gerados, a URL do `ingest.php`
-e o token criado. Ainda assim, **os passos 2 (importar o template), 6 (habilitar
-os módulos de frontend pelo Administration > General > Modules) e 7 (montar o
-dashboard) precisam ser feitos pela interface do Zabbix** — o script não
-substitui isso, só automatiza a parte de infraestrutura/arquivos.
+Quando perguntado, ele também pode instalar o agente coletor *neste mesmo
+host* (útil quando o appliance Zabbix também é um dos hosts monitorados,
+como no caso mais comum). **Para os demais hosts que você quer monitorar**
+(outros servidores Linux, ou qualquer host Windows), use os instaladores
+dedicados do agente — ver passo 5 abaixo — que não mexem em nada do lado
+servidor, só configuram a coleta naquele host específico.
+
+No final, `setup.py` imprime um resumo com os caminhos gerados, a URL do
+`ingest.php` e o token criado — **guarde a URL e o token**, você vai
+precisar deles ao instalar o agente nos demais hosts. Ainda assim, **os
+passos 2 (importar o template), 6 (habilitar os módulos de frontend pelo
+Administration > General > Modules) e 7 (montar o dashboard) precisam ser
+feitos pela interface do Zabbix** — nenhum script substitui isso.
 
 Se preferir configurar manualmente passo a passo (ou entender o que o script
 faz por debaixo dos panos), siga as seções abaixo.
@@ -128,16 +136,30 @@ mysql -u zabbix -p zabbix < sql/schema.sql
 
 ## 5. Instalar o agente coletor nos hosts monitorados
 
-```bash
-mkdir -p /opt/zabbix/ddosguard
-cp scripts/ddos_guard_agent.py /opt/zabbix/ddosguard/
-cp scripts/ddos_guard_agent.conf.example /etc/zabbix/ddos_guard_agent.conf
-# edite /etc/zabbix/ddos_guard_agent.conf: zbx_host, hostid, ingest_url, ingest_token
+O agente roda em **cada host** que você quer monitorar (servidores web,
+banco de dados, controladores de domínio, RDS, etc.) e é independente da
+parte de servidor (passos 2 a 4, que rodam só uma vez). Existem
+instaladores dedicados para Linux e Windows — rode o que for adequado em
+cada host.
 
-cp scripts/ddos-guard-agent.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now ddos-guard-agent
-systemctl status ddos-guard-agent
+### Linux
+
+```bash
+cd zbx_ddos_guard
+sudo ./scripts/install_agent_linux.sh
+```
+
+Ele detecta sozinho os logs disponíveis (iptables/UFW/fail2ban/ClamAV/auth),
+pergunta a URL do `ingest.php`, o token e o nome/hostid do host no Zabbix, e
+já instala o serviço systemd. Para automatizar (ex.: scripts de provisionamento),
+use os parâmetros sem interação:
+
+```bash
+sudo ./scripts/install_agent_linux.sh --yes \
+  --ingest-url "http://192.168.0.52/ddosguard/ingest.php" \
+  --token "SEU_TOKEN" \
+  --zbx-host "meu-servidor-web-01" \
+  --hostid 10084
 ```
 
 Geolocalização local (opcional, recomendado para evitar rate-limit de API):
@@ -146,6 +168,41 @@ pip3 install geoip2
 # baixe GeoLite2-City.mmdb (conta gratuita MaxMind) e coloque em
 # /usr/share/GeoIP/GeoLite2-City.mmdb
 ```
+
+### Windows
+
+Requer **Python 3.8+** instalado (com "Add python.exe to PATH" marcado na
+instalação) e o **[NSSM](https://nssm.cc/download)** para registrar o agente
+como serviço — baixe `nssm.exe` (build win64) e coloque dentro da pasta
+`scripts\`, ou deixe o instalador avisar onde colocá-lo.
+
+Abra o PowerShell **como Administrador** e rode:
+
+```powershell
+cd zbx_ddos_guard\scripts
+.\install_agent_windows.ps1
+```
+
+Ele detecta o Python, oferece instalar o `pywin32` (obrigatório — é como o
+agente lê o Event Log do Windows), pergunta a URL/token/host, habilita o
+log do Windows Firewall se estiver desligado (vem desabilitado por padrão
+em muitas instalações), e registra o serviço `DDoSGuardAgent` via NSSM.
+
+Para automatizar:
+```powershell
+.\install_agent_windows.ps1 -Yes `
+  -IngestUrl "http://192.168.0.52/ddosguard/ingest.php" `
+  -Token "SEU_TOKEN" `
+  -ZbxHost "WIN-SERVER01" `
+  -HostId 10085
+```
+
+No Windows, o agente detecta automaticamente:
+- **Tentativas de RDP/logon brute-force** — Event Log "Security", evento 4625.
+- **Bloqueios do Windows Firewall** — Event Log "Windows Firewall With
+  Advanced Security/Firewall", eventos 5152/5157.
+- **Detecções do Windows Defender** — Event Log "Windows Defender/Operational",
+  eventos 1116/1117.
 
 ---
 
