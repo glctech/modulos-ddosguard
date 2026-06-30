@@ -26,6 +26,7 @@ import configparser
 import getpass
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -270,7 +271,58 @@ def detect_zabbix_sender():
 
 
 def detect_frontend_webroot():
+    """Tenta achar o webroot real lendo a diretiva 'root' do vhost do
+    Nginx/Apache (forma confiável) e só cai para a lista de caminhos
+    prováveis se não conseguir ler a config do servidor web."""
+    nginx_root = _read_nginx_root()
+    if nginx_root:
+        return nginx_root
+
+    apache_root = _read_apache_documentroot()
+    if apache_root:
+        return apache_root
+
     return find_first_existing(FRONTEND_WEBROOT_CANDIDATES)
+
+
+def _read_nginx_root():
+    """Lê a primeira diretiva 'root <path>;' encontrada nos vhosts do
+    Zabbix. Evita usar a lista de candidatos por nome de pasta, que pode
+    escolher /usr/share/zabbix quando o Nginx na verdade serve a partir
+    de /usr/share/zabbix/ui (ou vice-versa)."""
+    conf_path = find_first_existing(NGINX_CONF_CANDIDATES)
+    if not conf_path:
+        return None
+    try:
+        with open(conf_path, encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+    except (PermissionError, OSError):
+        return None
+
+    match = re.search(r"\broot\s+([^\s;]+)\s*;", content)
+    if match:
+        path = match.group(1).strip()
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+def _read_apache_documentroot():
+    conf_path = find_first_existing(APACHE_CONF_CANDIDATES)
+    if not conf_path:
+        return None
+    try:
+        with open(conf_path, encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+    except (PermissionError, OSError):
+        return None
+
+    match = re.search(r"(?i)\bDocumentRoot\s+\"?([^\s\"]+)\"?", content)
+    if match:
+        path = match.group(1).strip()
+        if os.path.isdir(path):
+            return path
+    return None
 
 
 def detect_geoip_db():
@@ -629,12 +681,41 @@ def main():
             "de dentro da pasta do pacote DDoS Guard (zbx_ddos_guard/scripts/setup.py).")
         sys.exit(1)
 
+    # Procura outras cópias de ingest.php espalhadas pelo sistema (de
+    # execuções anteriores deste script rodadas de diretórios diferentes,
+    # ou de testes manuais). Cópias divergentes do publicado são a causa
+    # mais comum de "invalid token" mesmo com a config certa — o Nginx
+    # acaba servindo um ingest.php antigo/incompleto em vez do atual.
+    other_copies = _find_other_ingest_copies(ingest_dest_path)
+    if other_copies:
+        warn(f"Encontrei {len(other_copies)} outra(s) cópia(s) de ingest.php no sistema, "
+             "além da que será publicada agora:")
+        for path, size in other_copies:
+            print(f"        {path}  ({size} bytes)")
+        warn("Cópias divergentes confundem qual versão está realmente sendo servida "
+             "(ex.: uma sem a leitura de ingest.config.php). Recomendado remover as antigas.")
+        if ask_yes_no("Remover essas cópias antigas agora?", default=True, assume_yes=args.yes):
+            for path, _ in other_copies:
+                if args.dry_run:
+                    info(f"[dry-run] removeria {path}")
+                else:
+                    try:
+                        os.remove(path)
+                        ok(f"removido: {path}")
+                    except OSError as e:
+                        warn(f"não consegui remover {path}: {e}")
+
     if args.dry_run:
         info(f"[dry-run] copiaria {source_ingest} -> {ingest_dest_path}")
     else:
         os.makedirs(ingest_dest_dir, exist_ok=True)
         shutil.copyfile(source_ingest, ingest_dest_path)
-        ok(f"ingest.php copiado para {ingest_dest_path}")
+        try:
+            os.chmod(ingest_dest_path, 0o644)
+        except PermissionError:
+            warn(f"não foi possível ajustar permissões de {ingest_dest_path}")
+        ok(f"ingest.php copiado para {ingest_dest_path} "
+           f"({os.path.getsize(ingest_dest_path)} bytes)")
 
     # Sugere uma URL pública plausível; como isso depende da config exata
     # do vhost (alias, document_root etc.), é só um ponto de partida —
@@ -745,6 +826,53 @@ def main():
     info("Se ainda não importou, importe templates/template_ddos_guard.yaml no Zabbix")
     info("e habilite os módulos de frontend (Administration > General > Modules).")
     print()
+
+
+SEARCH_DIRS_FOR_STALE_INGEST = [
+    "/usr/share/zabbix",
+    "/usr/share",
+    "/var/www",
+    "/var/lib/zabbix",
+    "/usr/lib/zabbix",
+    "/etc/zabbix",
+    "/opt/zabbix",
+]
+
+
+def _find_other_ingest_copies(current_dest_path, max_depth=4):
+    """Procura por arquivos ingest.php em diretórios plausíveis do
+    Zabbix, fora o caminho que será publicado agora. Limitado a uma
+    lista curta de raízes conhecidas e a uma profundidade razoável (em
+    vez de 'find /' completo) para ser rápido mesmo em sistemas grandes
+    ou com /usr/share cheio de pacotes."""
+    current_dest_real = os.path.realpath(current_dest_path)
+    found = []
+    seen = set()
+
+    for base in SEARCH_DIRS_FOR_STALE_INGEST:
+        if not os.path.isdir(base):
+            continue
+        base_depth = base.rstrip(os.sep).count(os.sep)
+        for root, dirs, files in os.walk(base):
+            depth = root.rstrip(os.sep).count(os.sep) - base_depth
+            if depth >= max_depth:
+                dirs[:] = []  # não desce mais a partir daqui
+                continue
+            # Evita descer em pontos de montagem/diretórios gigantes irrelevantes.
+            dirs[:] = [d for d in dirs if d not in (".git", "node_modules")]
+            if "ingest.php" in files:
+                full_path = os.path.join(root, "ingest.php")
+                real_path = os.path.realpath(full_path)
+                if real_path == current_dest_real or real_path in seen:
+                    continue
+                seen.add(real_path)
+                try:
+                    size = os.path.getsize(full_path)
+                except OSError:
+                    size = -1
+                found.append((full_path, size))
+
+    return found
 
 
 def _guess_local_ip():
