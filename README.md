@@ -23,10 +23,6 @@ ou, se quiser pular direto para a configuração, rode o assistente interativo:
 ```bash
 python3 scripts/setup.py
 ```
-##Telas
-
-<img width="1737" height="925" alt="Capturar_select-area_20260630045943" src="https://github.com/user-attachments/assets/5ed84f5c-2a8e-4ace-b037-f3ad4096be0e" />
-
 
 Ele detecta o ambiente (appliance oficial, Apache/Nginx, MySQL/PostgreSQL) e
 configura o `ingest.php`, as tabelas auxiliares e o agente coletor
