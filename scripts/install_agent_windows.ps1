@@ -1,43 +1,42 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     DDoS Guard Agent - Instalador (Windows)
 
 .DESCRIPTION
     Instala SOMENTE o agente coletor (ddos_guard_agent.py) neste host
-    Windows, como serviço gerenciado pelo NSSM (Non-Sucking Service
-    Manager). Não mexe em banco de dados, ingest.php ou dashboards do
-    Zabbix - isso é feito uma única vez no servidor, via scripts/setup.py.
+    Windows como servico gerenciado pelo NSSM (Non-Sucking Service Manager).
+    Nao mexe em banco de dados, ingest.php ou dashboards do Zabbix.
 
-    O agente lê o Windows Event Log (Security, Windows Firewall,
+    O agente le o Windows Event Log (Security, Windows Firewall,
     Windows Defender) para detectar tentativas de RDP brute-force,
-    bloqueios de firewall e detecções de malware.
+    bloqueios de firewall e deteccoes de malware.
 
-    Requer: Python 3.8+ instalado e no PATH, com o pacote pywin32.
+    Requer: Python 3.8+ no PATH. Sem dependencias externas (pip install)
+    - o agente usa wevtutil.exe (nativo do Windows) para ler o Event Log.
 
 .PARAMETER Yes
-    Aceita todos os valores padrão/detectados sem perguntar.
+    Aceita todos os valores padrao sem perguntar.
 
 .PARAMETER IngestUrl
-    URL do ingest.php no servidor (ex.: http://192.168.0.52/ddosguard/ingest.php)
+    URL do ingest.php no servidor.
 
 .PARAMETER Token
-    Token de autenticação (o mesmo configurado no servidor).
+    Token de autenticacao.
 
 .PARAMETER ZbxHost
     Nome deste host exatamente como cadastrado no Zabbix.
 
 .PARAMETER HostId
-    hostid numérico deste host no Zabbix.
+    hostid numerico deste host no Zabbix.
 
 .EXAMPLE
     .\install_agent_windows.ps1
 
 .EXAMPLE
-    .\install_agent_windows.ps1 -Yes -IngestUrl "http://192.168.0.52/ddosguard/ingest.php" -Token "SEU_TOKEN" -ZbxHost "WIN-SERVER01" -HostId 10085
-
-    Rode este script em CADA host Windows que você quer monitorar
-    (servidores de aplicação, RDS, controladores de domínio, etc.).
+    .\install_agent_windows.ps1 -Yes `
+      -IngestUrl "http://192.168.0.52/ddosguard/ingest.php" `
+      -Token "SEU_TOKEN" -ZbxHost "WIN-SERVER01" -HostId 10085
 #>
 
 [CmdletBinding()]
@@ -52,7 +51,11 @@ param(
     [string]$ConfigDir = "C:\ProgramData\DDoSGuard"
 )
 
-$ErrorActionPreference = "Stop"
+# Usamos "Continue" em vez de "Stop" globalmente porque o PowerShell com
+# "Stop" trata stderr de processos externos (Python, pip) como erro fatal,
+# interrompendo o script prematuramente. Operacoes criticas usam
+# -ErrorAction Stop individualmente onde necessario.
+$ErrorActionPreference = "Continue"
 $ServiceName = "DDoSGuardAgent"
 
 # -------------------------------------------------------------------------
@@ -83,7 +86,7 @@ function Read-Value([string]$Prompt, [string]$Default = "") {
 function Read-RequiredValue([string]$Prompt, [string]$Default = "") {
     $value = Read-Value -Prompt $Prompt -Default $Default
     while ([string]::IsNullOrWhiteSpace($value)) {
-        Write-Warn "Esse valor é obrigatório."
+        Write-Warn "Esse valor e obrigatorio."
         $value = Read-Value -Prompt $Prompt -Default $Default
     }
     return $value
@@ -96,7 +99,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SourceAgent = Join-Path $ScriptDir "ddos_guard_agent.py"
 
 if (-not (Test-Path $SourceAgent)) {
-    Write-Err2 "Não encontrei $SourceAgent."
+    Write-Err2 "Nao encontrei $SourceAgent."
     Write-Err2 "Rode este instalador de dentro da pasta scripts\ do pacote DDoS Guard."
     exit 1
 }
@@ -105,93 +108,176 @@ Write-Header "DDoS Guard Agent - Instalador (Windows)"
 Write-Info "Este instalador configura SOMENTE o agente coletor neste host."
 Write-Info "Host atual: $env:COMPUTERNAME"
 
-# Localiza o Python
+# Localiza o Python real (ignora o stub/alias da Microsoft Store que fica
+# em WindowsApps e nao e o Python de verdade - abre a loja em vez de rodar).
 $PythonCmd = $null
+$PythonExe = $null
+
+# Caminhos onde o Python real costuma estar instalado no Windows.
+# Inclui tanto instalacao de usuario (LOCALAPPDATA) quanto instalacao
+# de sistema (ProgramFiles) e raiz do drive (comum em Windows Server).
+$RealPythonCandidates = @(
+    # Windows Server - instalacao na raiz (padrao para todos os usuarios)
+    "C:\Python313\python.exe",
+    "C:\Python312\python.exe",
+    "C:\Python311\python.exe",
+    "C:\Python310\python.exe",
+    "C:\Python39\python.exe",
+    "C:\Python38\python.exe",
+    # Instalacao em Program Files (sistema)
+    "$env:ProgramFiles\Python313\python.exe",
+    "$env:ProgramFiles\Python312\python.exe",
+    "$env:ProgramFiles\Python311\python.exe",
+    "$env:ProgramFiles\Python310\python.exe",
+    "$env:ProgramFiles\Python39\python.exe",
+    # Instalacao de usuario (desktop/workstation)
+    "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python310\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python39\python.exe",
+    # Python Launcher (py.exe) - funciona no Windows Server tambem
+    "$env:SystemRoot\py.exe",
+    "C:\WINDOWS\py.exe"
+)
+
+# Primeiro tenta achar via PATH, mas rejeita o stub da Store.
 foreach ($candidate in @("python", "python3", "py")) {
-    if (Get-Command $candidate -ErrorAction SilentlyContinue) {
+    $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+    if ($cmd) {
+        $path = $cmd.Source
+        # O stub da Store fica sempre em WindowsApps e tem tamanho ~0 bytes
+        # (e um reparse point) - rejeita qualquer coisa nesse caminho.
+        if ($path -like "*WindowsApps*") {
+            Write-Warn "Ignorando stub da Microsoft Store em: $path"
+            Write-Warn "(Esse nao e o Python real - e um atalho que abre a loja)"
+            continue
+        }
         $PythonCmd = $candidate
+        $PythonExe = $path
         break
     }
 }
-if (-not $PythonCmd) {
-    Write-Err2 "Python não encontrado no PATH. Instale o Python 3.8+ (https://python.org/downloads)"
-    Write-Err2 "marcando a opção 'Add python.exe to PATH' durante a instalação, e rode este script de novo."
-    exit 1
-}
-$PythonExe = (Get-Command $PythonCmd).Source
-Write-Ok "Python encontrado: $PythonExe"
 
-$PythonVersionOutput = & $PythonCmd --version 2>&1
-Write-Info "Versão: $PythonVersionOutput"
-
-# Checa pywin32 (obrigatório para ler o Event Log)
-& $PythonCmd -c "import win32evtlog" 2>$null
-$HasPywin32 = ($LASTEXITCODE -eq 0)
-
-if ($HasPywin32) {
-    Write-Ok "Pacote 'pywin32' já instalado."
-} else {
-    Write-Warn "Pacote 'pywin32' não encontrado (obrigatório para ler o Event Log do Windows)."
-    $installPywin32 = Read-Value "Instalar 'pywin32' agora via pip?" "s"
-    if ($installPywin32 -match '^[sS]') {
-        Write-Info "Instalando pywin32..."
-        & $PythonCmd -m pip install pywin32 2>&1 | ForEach-Object { Write-Host "    $_" }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Err2 "Falha ao instalar pywin32. Instale manualmente com: $PythonCmd -m pip install pywin32"
-        } else {
-            Write-Ok "pywin32 instalado."
+# Se nao achou no PATH, tenta os caminhos de instalacao padrao.
+if (-not $PythonExe) {
+    foreach ($path in $RealPythonCandidates) {
+        if (Test-Path $path) {
+            $PythonCmd = $path
+            $PythonExe = $path
+            break
         }
-    } else {
-        Write-Warn "Sem pywin32, o agente não conseguirá ler o Event Log. Instale depois com:"
-        Write-Warn "    $PythonCmd -m pip install pywin32"
     }
 }
 
+if (-not $PythonExe) {
+    Write-Err2 "Python real nao encontrado no sistema."
+    Write-Err2 ""
+
+    # Detecta se e Windows Server para dar instrucoes adequadas
+    $isServer = (Get-WmiObject Win32_OperatingSystem).ProductType -gt 1
+    if ($isServer) {
+        Write-Err2 "Instrucoes para Windows Server:"
+        Write-Err2 "  1. Baixe o instalador em: https://python.org/downloads/windows"
+        Write-Err2 "     Escolha 'Windows installer (64-bit)' para a versao 3.11.x ou mais recente."
+        Write-Err2 "  2. Execute o instalador como Administrador."
+        Write-Err2 "  3. Marque 'Install launcher for all users' e 'Add python.exe to PATH'."
+        Write-Err2 "  4. Selecione 'Install Now' ou 'Customize installation'."
+        Write-Err2 "  5. Abra um novo PowerShell de Administrador e rode este script novamente."
+    } else {
+        Write-Err2 "Opcao 1 - via winget (Windows 10/11):"
+        Write-Err2 "    winget install Python.Python.3.11"
+        Write-Err2 ""
+        Write-Err2 "Opcao 2 - download manual em https://python.org/downloads"
+        Write-Err2 "    Marque 'Add python.exe to PATH' durante a instalacao."
+        Write-Err2 "    Desative os stubs da Store em:"
+        Write-Err2 "    Configuracoes > Apps > Aliases de execucao de aplicativo"
+        Write-Err2 "    Desative 'python.exe' e 'python3.exe'"
+    }
+    Write-Err2 ""
+    Write-Err2 "Depois rode este script novamente."
+    exit 1
+}
+
+Write-Ok "Python encontrado: $PythonExe"
+
+# Testa que o Python realmente executa (nao e um stub morto).
+try {
+    $PythonVersionOutput = & $PythonCmd --version 2>&1
+} catch {
+    $PythonVersionOutput = ""
+}
+if ($LASTEXITCODE -ne 0 -or ($PythonVersionOutput -join '') -notmatch "Python \d") {
+    Write-Err2 "O Python em '$PythonExe' nao esta funcionando corretamente."
+    Write-Err2 "Saida: $PythonVersionOutput"
+    Write-Err2 "Instale o Python real em https://python.org/downloads"
+    exit 1
+}
+$VersionStr = ($PythonVersionOutput -join '').Trim()
+Write-Info "Versao: $VersionStr"
+
+# Verifica se wevtutil.exe esta disponivel (nativo do Windows, sempre presente).
+# O agente agora usa wevtutil.exe para ler o Event Log - sem pywin32, sem pip.
+$wevtutil = Get-Command "wevtutil.exe" -ErrorAction SilentlyContinue
+if ($wevtutil) {
+    Write-Ok "wevtutil.exe encontrado: $($wevtutil.Source)"
+    Write-Info "O agente le o Event Log via wevtutil.exe (nativo) - sem dependencias externas."
+} else {
+    Write-Warn "wevtutil.exe nao encontrado no PATH (incomum no Windows Server)."
+    Write-Warn "O Event Log nao sera lido. Verifique o estado do sistema."
+}
+
 # -------------------------------------------------------------------------
-# Conexão com o servidor
+# Conexao com o servidor
 # -------------------------------------------------------------------------
-Write-Header "1. Conexão com o servidor DDoS Guard"
+Write-Header "1. Conexao com o servidor DDoS Guard"
 
 if ([string]::IsNullOrWhiteSpace($IngestUrl)) {
     $IngestUrl = Read-RequiredValue "URL do ingest.php no servidor (ex.: http://192.168.0.52/ddosguard/ingest.php)"
 }
 if ([string]::IsNullOrWhiteSpace($Token)) {
-    $Token = Read-RequiredValue "Token de autenticação (o mesmo configurado no servidor)"
+    $Token = Read-RequiredValue "Token de autenticacao (o mesmo configurado no servidor)"
 }
 
-Write-Header "2. Identificação deste host no Zabbix"
+Write-Header "2. Identificacao deste host no Zabbix"
 
 if ([string]::IsNullOrWhiteSpace($ZbxHost)) {
-    $ZbxHost = Read-RequiredValue "Nome deste host EXATAMENTE como cadastrado no Zabbix (Data collection > Hosts)" $env:COMPUTERNAME
+    $ZbxHost = Read-RequiredValue "Nome deste host EXATAMENTE como cadastrado no Zabbix" $env:COMPUTERNAME
 }
 if ([string]::IsNullOrWhiteSpace($HostId) -or $HostId -eq "0") {
-    $HostId = Read-Value "hostid numérico deste host no Zabbix (veja na URL ao abrir o host; pode deixar 0 por enquanto)" "0"
+    $HostId = Read-Value "hostid numerico deste host no Zabbix (pode deixar 0 por enquanto)" "0"
 }
 
 # -------------------------------------------------------------------------
 # GeoIP (opcional)
 # -------------------------------------------------------------------------
-Write-Header "3. Geolocalização (opcional)"
+Write-Header "3. Geolocalizacao (opcional)"
 
 $GeoIpDb = Join-Path $ConfigDir "GeoLite2-City.mmdb"
 if (Test-Path $GeoIpDb) {
     Write-Ok "Base GeoIP encontrada: $GeoIpDb"
 } else {
-    Write-Warn "Base GeoLite2-City.mmdb não encontrada em $GeoIpDb."
-    Write-Warn "O agente vai usar a API pública ip-api.com para geolocalizar IPs (com limite de requisições)."
-    Write-Warn "Para geolocalização local, baixe a base gratuita da MaxMind e coloque em:"
+    Write-Warn "Base GeoLite2-City.mmdb nao encontrada em $GeoIpDb."
+    Write-Warn "O agente vai usar a API publica ip-api.com (com limite de requisicoes)."
+    Write-Warn "Para geolocalizacao local, baixe a base gratuita da MaxMind e coloque em:"
     Write-Warn "    $GeoIpDb"
 }
 
-& $PythonCmd -c "import geoip2" 2>$null
-if ($LASTEXITCODE -eq 0) {
+$HasGeoip2 = $false
+try {
+    $geoip2Check = & $PythonCmd -c "import geoip2; print('ok')" 2>&1
+    $HasGeoip2 = ($LASTEXITCODE -eq 0 -and ($geoip2Check -join '') -match 'ok')
+} catch {
+    $HasGeoip2 = $false
+}
+if ($HasGeoip2) {
     Write-Ok "Biblioteca 'geoip2' instalada."
 } else {
-    Write-Warn "Biblioteca Python 'geoip2' não instalada (opcional): $PythonCmd -m pip install geoip2"
+    Write-Warn "Biblioteca 'geoip2' nao instalada (opcional): $PythonCmd -m pip install geoip2"
 }
 
 # -------------------------------------------------------------------------
-# Instalação dos arquivos
+# Instalacao dos arquivos
 # -------------------------------------------------------------------------
 Write-Header "4. Instalando o agente"
 
@@ -203,7 +289,7 @@ Copy-Item -Path $SourceAgent -Destination $DestAgent -Force
 Write-Ok "Agente copiado para $DestAgent"
 
 $ConfigPath = Join-Path $ConfigDir "agent.conf"
-$StateFile = Join-Path $ConfigDir "state.json"
+$StateFile  = Join-Path $ConfigDir "state.json"
 
 $ConfigContent = @"
 [general]
@@ -224,135 +310,327 @@ windows_firewall_log = Microsoft-Windows-Windows Firewall With Advanced Security
 windows_defender_log = Microsoft-Windows-Windows Defender/Operational
 "@
 
-Set-Content -Path $ConfigPath -Value $ConfigContent -Encoding UTF8
-Write-Ok "Configuração escrita em $ConfigPath"
+# Escreve sem BOM (UTF-8 puro). No PowerShell 5.x do Windows Server,
+# Set-Content -Encoding UTF8 escreve com BOM (ï»¿), que quebra o
+# configparser do Python. Usamos [System.IO.File]::WriteAllText com
+# Encoding.UTF8 sem BOM para garantir compatibilidade.
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($ConfigPath, $ConfigContent, $Utf8NoBom)
+Write-Ok "Configuracao escrita em $ConfigPath"
 
-# Aviso sobre o log de Firewall, que precisa de auditoria habilitada e o
-# canal "Firewall" geralmente precisa ser habilitado manualmente.
+# Verifica se o log do Windows Firewall esta habilitado.
+# O nome do canal pode variar entre versoes do Windows/Server.
+$FirewallLogChannel = $null
 $FirewallLogEnabled = $false
-try {
-    $log = Get-WinEvent -ListLog "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall" -ErrorAction Stop
-    $FirewallLogEnabled = $log.IsEnabled
-} catch {
-    $FirewallLogEnabled = $false
+$FwChannelCandidates = @(
+    "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall",
+    "Microsoft-Windows-Windows Firewall With Advanced Security/ConnectionSecurity"
+)
+foreach ($channel in $FwChannelCandidates) {
+    try {
+        $log = Get-WinEvent -ListLog $channel -ErrorAction Stop
+        $FirewallLogChannel = $channel
+        $FirewallLogEnabled = $log.IsEnabled
+        break
+    } catch {
+        continue
+    }
 }
 
-if (-not $FirewallLogEnabled) {
-    Write-Warn "O canal de log do Windows Firewall não está habilitado (é comum vir desabilitado por padrão)."
-    Write-Warn "Sem ele, bloqueios do firewall não serão detectados (logons falhados e Defender continuam funcionando)."
-    $enableFwLog = Read-Value "Habilitar agora o log do Windows Firewall (wevtutil)?" "s"
-    if ($enableFwLog -match '^[sS]') {
-        try {
-            & wevtutil.exe set-log "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall" /e:true
-            Write-Ok "Log do Windows Firewall habilitado."
-            Write-Info 'Lembre-se também de habilitar a subcategoria de auditoria "Filtering Platform Packet Drop":'
-            Write-Info '    auditpol /set /subcategory:"Filtering Platform Packet Drop" /failure:enable'
-        } catch {
-            Write-Warn "Não consegui habilitar automaticamente. Habilite manualmente pelo Visualizador de Eventos"
-            Write-Warn "(Event Viewer > Applications and Services Logs > Microsoft > Windows > Windows Firewall With Advanced Security > Firewall > Enable Log)."
+if ($FirewallLogChannel) {
+    if (-not $FirewallLogEnabled) {
+        Write-Warn "Log do Windows Firewall encontrado mas nao esta habilitado."
+        Write-Warn "Sem ele, bloqueios do firewall nao serao detectados."
+        Write-Warn "Logons falhados (RDP/brute-force) e Windows Defender continuam funcionando."
+        $enableFwLog = Read-Value "Habilitar agora?" "s"
+        if ($enableFwLog -match '^[sS]') {
+            try {
+                & wevtutil.exe set-log $FirewallLogChannel /e:true
+                Write-Ok "Log do Windows Firewall habilitado."
+                Write-Info "Para capturar bloqueios de pacotes, habilite a auditoria (como Administrador):"
+                Write-Info '    auditpol /set /subcategory:"Filtering Platform Packet Drop" /failure:enable'
+                Write-Info '    auditpol /set /subcategory:"Filtering Platform Connection" /failure:enable'
+            } catch {
+                Write-Warn "Nao consegui habilitar automaticamente. Habilite manualmente:"
+                Write-Warn "    Event Viewer > Applications and Services Logs > Microsoft >"
+                Write-Warn "    Windows > Windows Firewall With Advanced Security > Firewall"
+                Write-Warn "    Clique com o botao direito > Enable Log"
+            }
         }
+    } else {
+        Write-Ok "Log do Windows Firewall ja esta habilitado: $FirewallLogChannel"
     }
 } else {
-    Write-Ok "Log do Windows Firewall já está habilitado."
+    Write-Warn "Nao encontrei o canal de log do Windows Firewall neste sistema."
+    Write-Warn "O agente vai monitorar logons falhados (Event ID 4625) e Windows Defender,"
+    Write-Warn "mas bloqueios de firewall nao serao detectados."
+    Write-Warn "Verifique se o Windows Defender Firewall esta ativo neste servidor."
 }
 
 # -------------------------------------------------------------------------
-# Serviço via NSSM
+# Servico do Windows
+# Estrategia: tenta NSSM primeiro (se disponivel), senao usa o
+# Agendador de Tarefas (Task Scheduler) nativo do Windows, que esta
+# presente em TODAS as versoes do Windows Server sem precisar de download.
 # -------------------------------------------------------------------------
-Write-Header "5. Configurando o serviço do Windows"
+Write-Header "5. Configurando o servico do Windows"
 
-$NssmExe = Join-Path $InstallDir "nssm.exe"
-$HasNssm = Test-Path $NssmExe
+$NssmExe    = Join-Path $InstallDir "nssm.exe"
+$HasNssm    = Test-Path $NssmExe
+$ServiceOk  = $false
+$ServiceMode = ""
 
+# Tenta achar nssm.exe no pacote (pasta scripts\)
 if (-not $HasNssm) {
-    # Tenta achar um nssm.exe já trazido junto do pacote (scripts\nssm.exe),
-    # caso o usuário já tenha baixado, antes de tentar buscar na internet.
     $BundledNssm = Join-Path $ScriptDir "nssm.exe"
     if (Test-Path $BundledNssm) {
         Copy-Item -Path $BundledNssm -Destination $NssmExe -Force
         $HasNssm = $true
-        Write-Ok "nssm.exe copiado do pacote para $NssmExe"
+        Write-Ok "nssm.exe encontrado no pacote e copiado para $NssmExe"
     }
 }
 
-if (-not $HasNssm) {
-    Write-Warn "nssm.exe não encontrado em $InstallDir nem em $ScriptDir."
-    Write-Warn "O NSSM é necessário para registrar o agente como serviço do Windows."
-    Write-Warn "Baixe em https://nssm.cc/download, extraia 'nssm.exe' (win64) para:"
-    Write-Warn "    $NssmExe"
-    Write-Warn "e rode este script novamente. Por ora, vou pular a criação do serviço."
-    Write-Warn ""
-    Write-Warn "Alternativa imediata sem serviço (rodar em primeiro plano para teste):"
-    Write-Warn "    $PythonCmd `"$DestAgent`" --config `"$ConfigPath`""
-} else {
-    # Remove serviço anterior, se existir, para recriar limpo (evita
-    # configuração divergente de uma instalação anterior).
+# ---- Opcao A: NSSM (servico Windows real, com restart automatico) -----
+if ($HasNssm) {
+    Write-Info "NSSM encontrado - registrando como servico Windows..."
+
     $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($existing) {
-        Write-Info "Serviço '$ServiceName' já existe — removendo para recriar com a config atual."
-        & $NssmExe stop $ServiceName 2>$null | Out-Null
-        & $NssmExe remove $ServiceName confirm 2>$null | Out-Null
+        Write-Info "Servico '$ServiceName' ja existe - removendo para recriar."
+        & $NssmExe stop $ServiceName 2>&1 | Out-Null
+        & $NssmExe remove $ServiceName confirm 2>&1 | Out-Null
         Start-Sleep -Seconds 1
     }
 
-    & $NssmExe install $ServiceName $PythonExe "`"$DestAgent`" --config `"$ConfigPath`""
-    & $NssmExe set $ServiceName AppDirectory $InstallDir
-    & $NssmExe set $ServiceName DisplayName "DDoS Guard Agent"
-    & $NssmExe set $ServiceName Description "Coletor de eventos de seguranca (firewall/antivirus/logon) para o Zabbix DDoS Guard."
-    & $NssmExe set $ServiceName Start SERVICE_AUTO_START
-    & $NssmExe set $ServiceName AppStdout (Join-Path $ConfigDir "agent.out.log")
-    & $NssmExe set $ServiceName AppStderr (Join-Path $ConfigDir "agent.err.log")
-    & $NssmExe set $ServiceName AppRotateFiles 1
-    & $NssmExe set $ServiceName AppRotateBytes 10485760
-    # Reinicia automaticamente se o processo cair.
-    & $NssmExe set $ServiceName AppExit Default Restart
-    & $NssmExe set $ServiceName AppRestartDelay 5000
+    & $NssmExe install $ServiceName $PythonExe "`"$DestAgent`" --config `"$ConfigPath`"" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppDirectory $InstallDir 2>&1 | Out-Null
+    & $NssmExe set $ServiceName DisplayName "DDoS Guard Agent" 2>&1 | Out-Null
+    & $NssmExe set $ServiceName Description "Coletor de eventos de seguranca para o Zabbix DDoS Guard." 2>&1 | Out-Null
+    & $NssmExe set $ServiceName Start SERVICE_AUTO_START 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppStdout (Join-Path $ConfigDir "agent.out.log") 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppStderr (Join-Path $ConfigDir "agent.err.log") 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppRotateFiles 1 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppRotateBytes 10485760 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppExit Default Restart 2>&1 | Out-Null
+    & $NssmExe set $ServiceName AppRestartDelay 5000 2>&1 | Out-Null
 
-    Write-Ok "Serviço '$ServiceName' registrado via NSSM."
-
-    Restart-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    Start-Service -Name $ServiceName -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 
     $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($svc -and $svc.Status -eq "Running") {
-        Write-Ok "Serviço '$ServiceName' rodando."
+        Write-Ok "Servico '$ServiceName' registrado e rodando via NSSM."
+        $ServiceOk   = $true
+        $ServiceMode = "NSSM (servico Windows)"
     } else {
-        Write-Err2 "O serviço não ficou em execução. Veja os logs em:"
-        Write-Err2 "    $(Join-Path $ConfigDir 'agent.err.log')"
+        Write-Warn "NSSM instalou o servico mas ele nao subiu - tentando via Task Scheduler..."
+        & $NssmExe remove $ServiceName confirm 2>&1 | Out-Null
+        $HasNssm = $false
     }
 }
 
-# -------------------------------------------------------------------------
-# Teste rápido
-# -------------------------------------------------------------------------
-Write-Header "6. Teste rápido"
+# ---- Opcao B: Task Scheduler nativo (sem dependencias externas) --------
+if (-not $ServiceOk) {
+    Write-Info "Registrando via Task Scheduler (nativo do Windows, sem downloads)..."
 
-if ($HasNssm) {
-    Write-Info "Aguardando alguns segundos para o agente enviar o primeiro heartbeat..."
-    Start-Sleep -Seconds 3
-    $errLog = Join-Path $ConfigDir "agent.err.log"
-    if (Test-Path $errLog) {
-        $tail = Get-Content $errLog -Tail 20 -ErrorAction SilentlyContinue
-        if ($tail -match "Unauthorized|invalid token") {
-            Write-Err2 "O agente está recebendo erro de autenticação do servidor."
-            Write-Err2 "Confira se o token usado bate com o configurado no ingest.config.php do servidor."
-        } elseif ($tail -match "Falha ao enviar") {
-            Write-Warn "O agente está rodando, mas teve falha ao enviar algum evento."
-            Write-Warn "Veja o log completo em: $errLog"
+    $LogFile   = Join-Path $ConfigDir "agent.log"
+    $TaskName  = "DDoSGuardAgent"
+    $TaskDescr = "DDoS Guard - coletor de eventos de seguranca para o Zabbix"
+
+    # O Task Scheduler roda como SYSTEM, que tem um PATH diferente do
+    # usuario atual. Se usamos py.exe (Python Launcher), ele pode nao
+    # encontrar o Python real porque a config fica em HKCU (por usuario).
+    # Solucao: resolver o caminho ABSOLUTO do python.exe real antes de
+    # registrar a tarefa, para nao depender do PATH do SYSTEM.
+
+    $AbsolutePythonExe = $PythonExe  # default: o que ja achamos
+
+    # Se o executavel e o launcher (py.exe), resolve para o python.exe real
+    if ($PythonExe -match "py\.exe$") {
+        Write-Info "Resolvendo caminho real do Python (py.exe e um launcher, nao funciona como SYSTEM)..."
+        try {
+            # py.exe -3 -c retorna o executavel real sendo usado
+            $resolvedPath = & $PythonExe -c "import sys; print(sys.executable)" 2>&1
+            $resolvedPath = ($resolvedPath -join '').Trim()
+            if ($resolvedPath -and (Test-Path $resolvedPath) -and $resolvedPath -notmatch "py\.exe$") {
+                $AbsolutePythonExe = $resolvedPath
+                Write-Ok "Python.exe real encontrado: $AbsolutePythonExe"
+            } else {
+                Write-Warn "Nao consegui resolver o python.exe a partir do py.exe."
+                Write-Warn "Tentando caminhos padrao de instalacao para todos os usuarios..."
+                # Tenta caminhos de instalacao "para todos os usuarios" (ProgramFiles)
+                $systemPythons = @(
+                    "$env:ProgramFiles\Python314\python.exe",
+                    "$env:ProgramFiles\Python313\python.exe",
+                    "$env:ProgramFiles\Python312\python.exe",
+                    "$env:ProgramFiles\Python311\python.exe",
+                    "$env:ProgramFiles\Python310\python.exe",
+                    "C:\Python314\python.exe",
+                    "C:\Python313\python.exe",
+                    "C:\Python312\python.exe",
+                    "C:\Python311\python.exe"
+                )
+                foreach ($sp in $systemPythons) {
+                    if (Test-Path $sp) {
+                        $AbsolutePythonExe = $sp
+                        Write-Ok "Python de sistema encontrado: $AbsolutePythonExe"
+                        break
+                    }
+                }
+            }
+        } catch {
+            Write-Warn "Erro ao resolver python.exe: $_"
+        }
+    }
+
+    # Verifica se o python.exe resolvido e acessivel pelo SYSTEM
+    # (deve estar em ProgramFiles ou na raiz de C:\, nao em AppData do usuario)
+    if ($AbsolutePythonExe -match "AppData|ADMINI~|Users\\") {
+        Write-Warn "O Python esta instalado apenas para o usuario atual ($AbsolutePythonExe)."
+        Write-Warn "O servico roda como SYSTEM e nao tem acesso a pasta AppData do usuario."
+        Write-Warn ""
+        Write-Warn "SOLUCAO RECOMENDADA: reinstale o Python marcando 'Install for all users':"
+        Write-Warn "  1. Va em Configuracoes > Apps > Python > Modificar"
+        Write-Warn "  2. OU baixe o instalador .exe de https://python.org/downloads/windows"
+        Write-Warn "     e execute como Administrador marcando 'Install for all users'"
+        Write-Warn ""
+        Write-Warn "Alternativa: rode o agente manualmente ou via logon do Administrator:"
+        Write-Warn "    $AbsolutePythonExe `"$DestAgent`" --config `"$ConfigPath`""
+        $ServiceMode = "NAO CONFIGURADO (Python apenas para usuario atual)"
+    } else {
+        Write-Ok "Python acessivel pelo SYSTEM: $AbsolutePythonExe"
+
+        # Monta o comando com caminho absoluto do python.exe
+        $CmdArgs = "/c `"`"$AbsolutePythonExe`" `"$DestAgent`" --config `"$ConfigPath`" >> `"$LogFile`" 2>&1`""
+
+    # Remove tarefa anterior se existir
+    $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existingTask) {
+        Write-Info "Tarefa '$TaskName' ja existe - removendo para recriar."
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+
+    try {
+        # Acao: rodar cmd.exe /c "python agente >> log 2>&1"
+        $action  = New-ScheduledTaskAction `
+                       -Execute "cmd.exe" `
+                       -Argument $CmdArgs `
+                       -WorkingDirectory $InstallDir
+
+        # Trigger: iniciar quando o sistema ligar (ao boot)
+        $triggerBoot = New-ScheduledTaskTrigger -AtStartup
+
+        # Principal: rodar como SYSTEM (sem necessidade de senha, reinicia
+        # automaticamente apos falha, tem acesso ao Event Log do Windows)
+        $principal = New-ScheduledTaskPrincipal `
+                         -UserId "NT AUTHORITY\SYSTEM" `
+                         -LogonType ServiceAccount `
+                         -RunLevel Highest
+
+        # Configuracoes: reiniciar em caso de falha, nao parar mesmo sem
+        # usuario logado, executar mesmo com bateria (servidores)
+        $settings = New-ScheduledTaskSettingsSet `
+                        -ExecutionTimeLimit (New-TimeSpan -Hours 0) `
+                        -RestartCount 999 `
+                        -RestartInterval (New-TimeSpan -Minutes 1) `
+                        -StartWhenAvailable `
+                        -RunOnlyIfNetworkAvailable:$false `
+                        -MultipleInstances IgnoreNew
+
+        $task = Register-ScheduledTask `
+                    -TaskName   $TaskName `
+                    -Description $TaskDescr `
+                    -Action     $action `
+                    -Trigger    $triggerBoot `
+                    -Principal  $principal `
+                    -Settings   $settings `
+                    -Force `
+                    -ErrorAction Stop
+
+        Write-Ok "Tarefa '$TaskName' registrada no Task Scheduler."
+
+        # Inicia imediatamente (nao espera o proximo boot)
+        Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+
+        $taskState = (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue).State
+        if ($taskState -eq "Running") {
+            Write-Ok "Agente iniciado e rodando (Task Scheduler)."
         } else {
-            Write-Ok "Nenhum erro óbvio no log até agora. Acompanhe com:"
-            Write-Host "        Get-Content `"$errLog`" -Wait -Tail 20"
+            Write-Info "Tarefa criada. Estado atual: $taskState"
+            Write-Info "(Normal - o agente inicia automaticamente no proximo boot ou pelo Task Scheduler.)"
+        }
+
+        $ServiceOk   = $true
+        $ServiceMode = "Task Scheduler (nativo Windows)"
+
+    } catch {
+        Write-Warn "Nao consegui criar a tarefa no Task Scheduler: $_"
+        Write-Warn ""
+        Write-Warn "Para registrar manualmente depois, rode:"
+        Write-Warn "    schtasks /create /tn DDoSGuardAgent /tr `"$AbsolutePythonExe $DestAgent --config $ConfigPath`" /sc onstart /ru SYSTEM /f"
+        Write-Warn ""
+        Write-Warn "Ou para testar agora em primeiro plano:"
+        Write-Warn "    $AbsolutePythonExe `"$DestAgent`" --config `"$ConfigPath`""
+        $ServiceMode = "NAO CONFIGURADO"
+    }
+    } # fecha o bloco else (Python acessivel pelo SYSTEM)
+} # fecha o bloco if (-not $ServiceOk)
+
+# -------------------------------------------------------------------------
+# Teste rapido
+# -------------------------------------------------------------------------
+Write-Header "6. Teste rapido"
+
+if ($ServiceOk) {
+    Write-Info "Aguardando o agente enviar o primeiro heartbeat..."
+    Start-Sleep -Seconds 4
+    $logFile = Join-Path $ConfigDir "agent.log"
+    $errFile = Join-Path $ConfigDir "agent.err.log"
+    # Verifica nos dois possiveis arquivos de log (NSSM ou Task Scheduler)
+    foreach ($lf in @($errFile, $logFile)) {
+        if (Test-Path $lf) {
+            $tail = Get-Content $lf -Tail 20 -ErrorAction SilentlyContinue
+            if ($tail) {
+                if ($tail -match "Unauthorized|invalid token") {
+                    Write-Err2 "Erro de autenticacao detectado no log."
+                    Write-Err2 "Confira se o token bate com o do servidor (ingest.config.php)."
+                } elseif ($tail -match "Falha ao enviar") {
+                    Write-Warn "O agente esta rodando mas teve falha de envio."
+                    Write-Warn "Veja o log completo em: $lf"
+                } elseif ($tail -match "Agent iniciado|iniciado") {
+                    Write-Ok "Agente iniciado com sucesso. Acompanhe com:"
+                    Write-Host "        Get-Content `"$lf`" -Wait -Tail 20"
+                } else {
+                    Write-Info "Log encontrado em: $lf - Acompanhe com:"
+                    Write-Host "        Get-Content `"$lf`" -Wait -Tail 20"
+                }
+                break
+            }
         }
     }
 }
 
+# -------------------------------------------------------------------------
+# Resumo
+# -------------------------------------------------------------------------
 Write-Header "Resumo"
 Write-Host "  Agente instalado em ..... $DestAgent"
-Write-Host "  Configuração ............ $ConfigPath"
-Write-Host "  Serviço .................. $ServiceName $(if ($HasNssm) {'(NSSM)'} else {'(NAO CRIADO - veja avisos acima)'})"
+Write-Host "  Configuracao ............ $ConfigPath"
+Write-Host "  Log ...................... $(Join-Path $ConfigDir 'agent.log')"
+Write-Host "  Modo de servico ......... $ServiceMode"
 Write-Host "  zbx_host ................. $ZbxHost"
 Write-Host "  Servidor (ingest_url) .... $IngestUrl"
 Write-Host ""
 Write-Info "Confirme em Data collection > Hosts que o host '$ZbxHost' existe no Zabbix"
-Write-Info "e que o template 'DDoS Guard - Security Monitoring' está associado a ele."
+Write-Info "e que o template 'DDoS Guard - Security Monitoring' esta associado a ele."
+if ($ServiceMode -eq "Task Scheduler (nativo Windows)") {
+    Write-Info ""
+    Write-Info "Gerenciar o agente via Task Scheduler:"
+    Write-Info "  Ver status:  Get-ScheduledTask -TaskName DDoSGuardAgent"
+    Write-Info "  Iniciar:     Start-ScheduledTask -TaskName DDoSGuardAgent"
+    Write-Info "  Parar:       Stop-ScheduledTask -TaskName DDoSGuardAgent"
+    Write-Info "  Remover:     Unregister-ScheduledTask -TaskName DDoSGuardAgent -Confirm:`$false"
+    Write-Info "  Ver log:     Get-Content `"$(Join-Path $ConfigDir 'agent.log')`" -Wait -Tail 20"
+}
 Write-Host ""

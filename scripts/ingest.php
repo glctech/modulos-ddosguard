@@ -205,7 +205,8 @@ switch ($event_type) {
         ]);
 
         send_to_zabbix($ZBX_SENDER_BIN, $ZBX_SERVER, $ZBX_PORT, $hostname, [
-            'ddosguard.attacks.rate' => $payload['attempts'] ?? 1,
+            'ddosguard.attacks.rate'  => $payload['attempts'] ?? 1,
+            'ddosguard.attack.event'  => json_encode($payload, JSON_UNESCAPED_UNICODE),
         ]);
         respond(200, ['ok' => true]);
         break;
@@ -232,7 +233,8 @@ switch ($event_type) {
         ]);
 
         send_to_zabbix($ZBX_SENDER_BIN, $ZBX_SERVER, $ZBX_PORT, $hostname, [
-            'ddosguard.firewall.rate' => 1,
+            'ddosguard.firewall.rate'  => 1,
+            'ddosguard.block.firewall' => json_encode($payload, JSON_UNESCAPED_UNICODE),
         ]);
         respond(200, ['ok' => true]);
         break;
@@ -258,7 +260,8 @@ switch ($event_type) {
         ]);
 
         send_to_zabbix($ZBX_SENDER_BIN, $ZBX_SERVER, $ZBX_PORT, $hostname, [
-            'ddosguard.antivirus.rate' => 1,
+            'ddosguard.antivirus.rate'    => 1,
+            'ddosguard.block.antivirus'   => json_encode($payload, JSON_UNESCAPED_UNICODE),
         ]);
         respond(200, ['ok' => true]);
         break;

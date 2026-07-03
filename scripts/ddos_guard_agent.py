@@ -49,6 +49,7 @@ import os
 import platform
 import re
 import socket
+import subprocess
 import sys
 import time
 import urllib.request
@@ -64,15 +65,9 @@ try:
 except ImportError:
     HAS_GEOIP2 = False
 
-HAS_WIN32EVTLOG = False
-if IS_WINDOWS:
-    try:
-        import win32evtlog
-        import win32evtlogutil
-        import win32con
-        HAS_WIN32EVTLOG = True
-    except ImportError:
-        HAS_WIN32EVTLOG = False
+HAS_WIN32EVTLOG = False  # mantido por compatibilidade, nao usado mais
+# O agente Windows agora usa wevtutil.exe (nativo do Windows) em vez
+# do pywin32, eliminando qualquer dependencia de 'pip install'.
 
 
 # ---------------------------------------------------------------------
@@ -202,11 +197,20 @@ class LogTailer:
             self._pos = 0  # arquivo truncado
 
         lines = []
-        with open(self.path, "r", errors="ignore") as f:
-            f.seek(self._pos)
-            for line in f:
-                lines.append(line.rstrip("\n"))
-            self._pos = f.tell()
+        try:
+            with open(self.path, "r", errors="ignore") as f:
+                f.seek(self._pos)
+                for line in f:
+                    lines.append(line.rstrip("\n"))
+                self._pos = f.tell()
+        except PermissionError:
+            # Loga o aviso apenas uma vez (na primeira ocorrencia)
+            if not getattr(self, '_perm_warned', False):
+                log(f"Sem permissao para ler {self.path} - "
+                    f"execute: chmod 644 {self.path}")
+                self._perm_warned = True
+        except OSError as e:
+            log(f"Erro ao ler {self.path}: {e}")
         return lines
 
 
@@ -214,76 +218,139 @@ IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
 class WindowsEventLogReader:
-    """Lê novos eventos de um canal do Windows Event Log de forma
-    incremental (equivalente ao LogTailer, mas usando a API nativa do
-    Windows via pywin32 em vez de arquivo de texto).
+    """Le novos eventos do Windows Event Log usando wevtutil.exe,
+    que e 100% nativo do Windows (sem necessidade de pywin32 ou
+    qualquer pip install).
 
-    Guarda o RecordNumber do último evento lido para não reprocessar
-    eventos antigos a cada ciclo.
+    wevtutil qe (query-events) retorna eventos em XML, que parseamos
+    com o modulo xml.etree.ElementTree da biblioteca padrao do Python.
+    Guarda o RecordNumber do ultimo evento lido para leitura incremental.
     """
 
     def __init__(self, channel, event_ids=None):
         self.channel = channel
         self.event_ids = set(event_ids) if event_ids else None
         self._last_record_number = None
-        self._available = HAS_WIN32EVTLOG
 
     def read_new_events(self):
-        if not self._available or not self.channel:
+        if not self.channel:
+            return []
+
+        # Monta o XPath que filtra pelos event IDs que nos interessam.
+        # Se nao foi especificado, pega todos (limitado a 100 mais recentes).
+        if self.event_ids:
+            ids_xpath = " or ".join(
+                f"EventID={eid}" for eid in sorted(self.event_ids)
+            )
+            xpath = f"*[System[({ids_xpath})]]"
+        else:
+            xpath = "*"
+
+        # Determina o ponto de partida: se ja lemos antes, filtra por
+        # RecordNumber > ultimo lido. Na primeira execucao, pega so os
+        # ultimos 50 eventos para nao processar historico gigante
+        # (o log Security em producao pode ter milhoes de entradas).
+        if self._last_record_number is not None:
+            # Filtra por EventRecordID maior que o ultimo processado
+            if self.event_ids:
+                ids_xpath = " or ".join(
+                    f"EventID={eid}" for eid in sorted(self.event_ids)
+                )
+                xpath = f"*[System[({ids_xpath}) and EventRecordID > {self._last_record_number}]]"
+            else:
+                xpath = f"*[System[EventRecordID > {self._last_record_number}]]"
+            count_arg = []
+        else:
+            # Primeira execucao: pega so os 50 mais recentes
+            count_arg = ["/c:50", "/rd:true"]
+
+        cmd = [
+            "wevtutil.exe", "qe", self.channel,
+            "/f:xml",
+            f"/q:{xpath}",
+        ] + count_arg
+
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=15,
+            )
+        except FileNotFoundError:
+            log("wevtutil.exe nao encontrado - Event Log nao sera lido.")
+            return []
+        except subprocess.TimeoutExpired:
+            return []
+
+        if not result.stdout.strip():
+            return []
+
+        # wevtutil retorna eventos XML sem raiz — adiciona wrapper para
+        # que o ElementTree consiga parsear como um documento valido.
+        xml_text = "<Events>" + result.stdout + "</Events>"
+        try:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(xml_text)
+        except Exception as e:
+            log(f"Erro ao parsear XML do Event Log ({self.channel}): {e}")
             return []
 
         events = []
-        try:
-            handle = win32evtlog.OpenEventLog(None, self.channel)
-        except Exception as e:
-            log(f"Não foi possível abrir o canal de log '{self.channel}': {e}")
-            return []
+        max_record = self._last_record_number
 
-        try:
-            flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-            collected = []
-            while True:
-                records = win32evtlog.ReadEventLog(handle, flags, 0)
-                if not records:
-                    break
-                stop = False
-                for record in records:
-                    if self._last_record_number is not None and record.RecordNumber <= self._last_record_number:
-                        stop = True
-                        break
-                    collected.append(record)
-                if stop:
-                    break
-                # Limite de segurança: evita processar um histórico gigante
-                # na primeira execução (ex.: log de Security com milhões de
-                # eventos antigos). Pega só os mais recentes.
-                if len(collected) >= 2000:
-                    break
+        for event_elem in root.findall("Event"):
+            ns = {"w": "http://schemas.microsoft.com/win/2004/08/events/event"}
 
-            if collected:
-                # Veio em ordem "mais novo -> mais antigo"; processa em
-                # ordem cronológica e atualiza o marcador para o mais novo.
-                collected.reverse()
-                self._last_record_number = collected[-1].RecordNumber
-                for record in collected:
-                    if self.event_ids and (record.EventID & 0xFFFF) not in self.event_ids:
-                        continue
-                    try:
-                        message = win32evtlogutil.SafeFormatMessage(record, self.channel)
-                    except Exception:
-                        message = " ".join(str(s) for s in (record.StringInserts or []))
-                    events.append({
-                        "event_id": record.EventID & 0xFFFF,
-                        "time_generated": record.TimeGenerated,
-                        "message": message or "",
-                    })
-        except Exception as e:
-            log(f"Erro lendo eventos de '{self.channel}': {e}")
-        finally:
+            # Extrai EventID e EventRecordID do bloco System
+            system = event_elem.find("w:System", ns)
+            if system is None:
+                continue
+
+            eid_elem = system.find("w:EventID", ns)
+            if eid_elem is None:
+                continue
             try:
-                win32evtlog.CloseEventLog(handle)
-            except Exception:
-                pass
+                event_id = int(eid_elem.text)
+            except (TypeError, ValueError):
+                continue
+
+            record_elem = system.find("w:EventRecordID", ns)
+            try:
+                record_id = int(record_elem.text) if record_elem is not None else 0
+            except (TypeError, ValueError):
+                record_id = 0
+
+            if max_record is None or record_id > max_record:
+                max_record = record_id
+
+            # Monta a mensagem concatenando todos os EventData/Data
+            parts = []
+            event_data = event_elem.find("w:EventData", ns)
+            if event_data is not None:
+                for data in event_data.findall("w:Data", ns):
+                    name = data.get("Name", "")
+                    val  = (data.text or "").strip()
+                    if name and val and val not in ("-", "%%1833"):
+                        parts.append(f"{name}: {val}")
+
+            message = "\n".join(parts)
+
+            events.append({
+                "event_id": event_id,
+                "record_id": record_id,
+                "message": message,
+                "time_generated": None,
+            })
+
+        if max_record is not None:
+            self._last_record_number = max_record
+
+        # Na primeira execucao vieram em ordem reversa (rd:true);
+        # inverte para processar do mais antigo ao mais novo.
+        if count_arg:
+            events.reverse()
 
         return events
 
@@ -344,6 +411,8 @@ class IngestClient:
         try:
             with urllib.request.urlopen(req, timeout=5) as r:
                 r.read()
+            if event_type == "heartbeat":
+                log(f"Heartbeat enviado com sucesso para {self.url}")
             return True
         except urllib.error.URLError as e:
             log(f"Falha ao enviar evento '{event_type}' para o ingest: {e}")
@@ -367,10 +436,7 @@ class DDoSGuardAgent:
         self.ingest = IngestClient(g["ingest_url"], g["ingest_token"])
 
         if IS_WINDOWS:
-            if not HAS_WIN32EVTLOG:
-                log("AVISO: pacote 'pywin32' não encontrado. Instale com "
-                    "'pip install pywin32' para o agente conseguir ler o "
-                    "Event Log do Windows (Firewall, Defender, logons).")
+            log("Windows detectado — usando wevtutil.exe para leitura do Event Log (sem pywin32).")
             # Event ID 4625 = falha de logon (RDP/SMB/local brute-force).
             self.win_security = WindowsEventLogReader(s.get("windows_security_log"), event_ids=[4625])
             # Event IDs 5152/5157 = Windows Filtering Platform bloqueou um pacote/conexão.
@@ -508,12 +574,28 @@ class DDoSGuardAgent:
         for ev in events:
             if ev["event_id"] != 4625:
                 continue
-            ip = extract_ip(ev["message"])
+
+            message = ev["message"]
             ts = now_ts()
-            # IPs locais/loopback em logon falhado não são interessantes
-            # (geralmente o próprio serviço testando credenciais).
-            if not ip or ip.startswith(("127.", "0.0.0.0")):
-                ip = ip or "0.0.0.0"
+
+            # No XML do evento 4625, o IP de origem fica em Data Name="IpAddress".
+            # O WindowsEventLogReader monta a mensagem como "IpAddress: x.x.x.x\n..."
+            ip = None
+            m = re.search(r"IpAddress:\s*([^\s\r\n]+)", message)
+            if m:
+                raw_ip = m.group(1).strip()
+                # Ignora loopback IPv4/IPv6 e valores nulos
+                if raw_ip not in ("-", "::1", "::", "0.0.0.0") and \
+                   not raw_ip.startswith("127."):
+                    ip = raw_ip
+
+            # Fallback: tenta extrair qualquer IPv4 da mensagem
+            if not ip:
+                ip = extract_ip(message)
+
+            # Descarta loopback, nulos e IPs invalidos
+            if not ip or ip in ("0.0.0.0", "-", "::1", "::") or ip.startswith("127."):
+                continue
 
             key = (ip, "BRUTE_FORCE_RDP")
             agg = self._agg[key]
@@ -679,9 +761,11 @@ def main():
     ap.add_argument("--once", action="store_true", help="Executa um único ciclo de coleta e sai (uso via cron / Agendador de Tarefas).")
     args = ap.parse_args()
 
-    if IS_WINDOWS and not HAS_WIN32EVTLOG:
-        log("ERRO: este agente precisa do pacote 'pywin32' para rodar no Windows. "
-            "Instale com: pip install pywin32")
+    if IS_WINDOWS:
+        import shutil as _shutil
+        if not _shutil.which("wevtutil"):
+            log("AVISO: wevtutil.exe nao encontrado no PATH. "
+                "O Event Log nao sera lido.")
 
     cfg = load_config(args.config)
     agent = DDoSGuardAgent(cfg)
