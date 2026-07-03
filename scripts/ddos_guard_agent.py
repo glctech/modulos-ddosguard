@@ -355,6 +355,40 @@ class WindowsEventLogReader:
         return events
 
 
+def is_private_ip(ip):
+    """Retorna True para IPs que nao devem ser tratados como atacantes externos:
+    RFC1918 (privados), loopback, link-local, broadcast e multicast."""
+    if not ip:
+        return True
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return True
+    try:
+        a, b = int(parts[0]), int(parts[1])
+    except ValueError:
+        return True
+    # Loopback
+    if a == 127:
+        return True
+    # RFC1918 privados
+    if a == 10:
+        return True
+    if a == 172 and 16 <= b <= 31:
+        return True
+    if a == 192 and b == 168:
+        return True
+    # Link-local
+    if a == 169 and b == 254:
+        return True
+    # Broadcast / this-network
+    if ip in ("0.0.0.0", "255.255.255.255"):
+        return True
+    # Multicast
+    if 224 <= a <= 239:
+        return True
+    return False
+
+
 def extract_ip(line):
     # Prioriza padrões "SRC=x.x.x.x" (iptables) e "from x.x.x.x" (sshd/fail2ban).
     m = re.search(r"SRC=(\d{1,3}(?:\.\d{1,3}){3})", line)
@@ -465,9 +499,9 @@ class DDoSGuardAgent:
         for line in lines:
             if not line:
                 continue
-            is_drop = bool(re.search(r"DROP|REJECT|DENY|BLOCK", line, re.I))
+            is_drop = bool(re.search(r"DROP|REJECT|DENY|BLOCK|IPTABLES_DROP", line, re.I))
             ip = extract_ip(line)
-            if not ip:
+            if not ip or is_private_ip(ip):
                 continue
 
             attack_type = classify_attack(line)
@@ -491,6 +525,8 @@ class DDoSGuardAgent:
                     "src_ip": ip,
                     "country": geo["country"],
                     "country_name": geo["country_name"],
+                    "city": geo.get("city"),
+                    "asn": geo.get("asn"),
                     "tool": source_name,
                     "rule": line[-200:],
                     "target_port": port,
@@ -499,12 +535,13 @@ class DDoSGuardAgent:
                     "timestamp": ts,
                 })
 
+
     def _process_fail2ban_lines(self, lines):
         for line in lines:
             if "Ban " not in line and "Found " not in line:
                 continue
             ip = extract_ip(line)
-            if not ip:
+            if not ip or is_private_ip(ip):
                 continue
             ts = now_ts()
             geo = self.geo.resolve(ip)
@@ -522,6 +559,8 @@ class DDoSGuardAgent:
                     "src_ip": ip,
                     "country": geo["country"],
                     "country_name": geo["country_name"],
+                    "city": geo.get("city"),
+                    "asn": geo.get("asn"),
                     "tool": "fail2ban",
                     "rule": "BAN",
                     "reason": "BRUTE_FORCE_SSH",
@@ -533,7 +572,7 @@ class DDoSGuardAgent:
             if "Failed password" not in line and "authentication failure" not in line:
                 continue
             ip = extract_ip(line)
-            if not ip:
+            if not ip or is_private_ip(ip):
                 continue
             ts = now_ts()
             key = (ip, "BRUTE_FORCE_SSH")
