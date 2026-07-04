@@ -351,3 +351,41 @@ para o `ingest.php` com `event_type: "status"` e os campos `has_firewall`,
 > valor salvo é sempre um código inteiro, e o controller (`WidgetView.php`)
 > deve interpretar esse inteiro (ver os `switch`/`if` em
 > `fetchAttacks()`/`fetchBlocks()` como exemplo).
+
+---
+
+## 11. Template dedicado para o agente (`DDoS Guard - Agent`)
+
+O arquivo `templates/template_ddos_guard_agent.yaml` é um template leve
+para associar **em cada host monitorado** (servidores Linux e Windows com
+o `ddos_guard_agent.py` instalado). Ele contém apenas os 8 itens trapper
+e 6 triggers essenciais — sem dashboard.
+
+### Quando usar qual template
+
+| Template | Onde associar | O que tem |
+|---|---|---|
+| `DDoS Guard - Security Monitoring` | Só no appliance/Zabbix Server | Itens + triggers + **dashboard** |
+| `DDoS Guard - Agent` | Em cada host monitorado | Só itens + triggers por host |
+
+### Importar e associar
+
+1. **Administration → Templates → Import**
+   Importe `template_ddos_guard_agent.yaml`
+
+2. **Data collection → Hosts → [seu host] → Templates**
+   Associe `DDoS Guard - Agent` em cada servidor que tem o agente instalado
+
+3. O template `DDoS Guard - Security Monitoring` continua associado
+   **apenas no appliance** (ou no host onde o Zabbix Server roda)
+
+### Triggers incluídas no `DDoS Guard - Agent`
+
+| Trigger | Prioridade | Condição |
+|---|---|---|
+| Agente parou de enviar dados | Warning | Sem heartbeat por 15min |
+| Pico de ataques (>= 50/min) | High | `attacks.rate >= 50` por 2min |
+| Possível DDoS (>= 200/min) | Disaster | `attacks.rate >= 200` por 5min |
+| Ataque distribuído (>= 50 IPs) | Disaster | `distinct_ips >= 50` por 5min |
+| Volume alto de bloqueios | High | `firewall.rate >= 500` por 10min |
+| Múltiplas detecções de malware | High | `antivirus.rate >= 5` por 10min |

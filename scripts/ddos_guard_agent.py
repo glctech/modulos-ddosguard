@@ -175,10 +175,22 @@ class GeoResolver:
 # Leitura incremental de arquivos de log (estilo "tail -F")
 # ---------------------------------------------------------------------
 class LogTailer:
-    def __init__(self, path):
+    def __init__(self, path, skip_existing=True):
+        """
+        skip_existing=True (padrao): na primeira leitura, pula para o
+        final do arquivo (ignora historico). Isso evita reprocessar
+        milhares de entradas antigas do /var/log/messages ao reiniciar.
+        skip_existing=False: le desde o inicio (util para debug).
+        """
         self.path = path
         self._inode = None
-        self._pos = 0
+        if skip_existing and path and os.path.exists(path):
+            try:
+                self._pos = os.path.getsize(path)
+            except OSError:
+                self._pos = 0
+        else:
+            self._pos = 0
 
     def read_new_lines(self):
         if not self.path or not os.path.exists(self.path):
@@ -499,7 +511,18 @@ class DDoSGuardAgent:
         for line in lines:
             if not line:
                 continue
-            is_drop = bool(re.search(r"DROP|REJECT|DENY|BLOCK|IPTABLES_DROP", line, re.I))
+
+            # Detecta bloqueios: iptables DROP, UFW BLOCK, firewalld REJECT etc.
+            is_drop = bool(re.search(
+                r"DROP|REJECT|DENY|\[UFW BLOCK\]|IPTABLES_DROP|BLOCKED",
+                line, re.I
+            ))
+            # UFW AUDIT e apenas informativo (nao e bloqueio nem ataque)
+            if "[UFW AUDIT]" in line and "[UFW BLOCK]" not in line:
+                continue
+            # UFW ALLOW de trafego de ENTRADA com IP externo = monitora mas nao bloqueia
+            is_ufw_allow_in = "[UFW ALLOW]" in line and "IN=" in line and "OUT= " not in line
+
             ip = extract_ip(line)
             if not ip or is_private_ip(ip):
                 continue

@@ -212,31 +212,47 @@ switch ($event_type) {
         break;
 
     case 'block_firewall':
-        $stmt = $pdo->prepare("INSERT INTO ddosguard_blocks
-            (hostid, src_ip, country_code, country_name, block_source, tool,
-             rule_or_signature, target_port, protocol, reason, raw_data, event_time, created_at)
-            VALUES (:hostid,:src_ip,:country_code,:country_name,'firewall',:tool,
-             :rule,:target_port,:protocol,:reason,:raw_data,:event_time,:created_at)");
-        $stmt->execute([
-            ':hostid'       => $hostid,
-            ':src_ip'       => $payload['src_ip'] ?? '',
-            ':country_code' => $payload['country'] ?? null,
-            ':country_name' => $payload['country_name'] ?? null,
-            ':tool'         => $payload['tool'] ?? null,
-            ':rule'         => $payload['rule'] ?? null,
-            ':target_port'  => $payload['target_port'] ?? null,
-            ':protocol'     => $payload['protocol'] ?? null,
-            ':reason'       => $payload['reason'] ?? null,
-            ':raw_data'     => json_encode($payload, JSON_UNESCAPED_UNICODE),
-            ':event_time'   => isset($payload['timestamp']) ? date('Y-m-d H:i:s', (int) $payload['timestamp']) : $now,
-            ':created_at'   => $now,
-        ]);
+        // Deduplica: se ja existe bloqueio do mesmo IP nos ultimos 60s, apenas
+        // incrementa o contador em vez de inserir uma linha nova por pacote.
+        $src_ip = $payload['src_ip'] ?? '';
+        $stmt = $pdo->prepare("SELECT id FROM ddosguard_blocks
+            WHERE hostid=:hostid AND src_ip=:src_ip AND block_source='firewall'
+              AND event_time >= NOW() - INTERVAL 60 SECOND
+            LIMIT 1");
+        $stmt->execute([':hostid' => $hostid, ':src_ip' => $src_ip]);
+        $existing = $stmt->fetch();
 
-        send_to_zabbix($ZBX_SENDER_BIN, $ZBX_SERVER, $ZBX_PORT, $hostname, [
-            'ddosguard.firewall.rate'  => 1,
-            'ddosguard.block.firewall' => json_encode($payload, JSON_UNESCAPED_UNICODE),
-        ]);
-        respond(200, ['ok' => true]);
+        if ($existing) {
+            // Ja existe — apenas atualiza o timestamp para manter ativo
+            $pdo->prepare("UPDATE ddosguard_blocks SET event_time=NOW(), updated_at=NOW()
+                WHERE id=:id")->execute([':id' => $existing['id']]);
+            respond(200, ['ok' => true]);
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO ddosguard_blocks
+                (hostid, src_ip, country_code, country_name, block_source, tool,
+                 rule_or_signature, target_port, protocol, reason, raw_data, event_time, created_at)
+                VALUES (:hostid,:src_ip,:country_code,:country_name,'firewall',:tool,
+                 :rule,:target_port,:protocol,:reason,:raw_data,:event_time,:created_at)");
+            $stmt->execute([
+                ':hostid'       => $hostid,
+                ':src_ip'       => $payload['src_ip'] ?? '',
+                ':country_code' => $payload['country'] ?? null,
+                ':country_name' => $payload['country_name'] ?? null,
+                ':tool'         => $payload['tool'] ?? null,
+                ':rule'         => $payload['rule'] ?? null,
+                ':target_port'  => $payload['target_port'] ?? null,
+                ':protocol'     => $payload['protocol'] ?? null,
+                ':reason'       => $payload['reason'] ?? null,
+                ':raw_data'     => json_encode($payload, JSON_UNESCAPED_UNICODE),
+                ':event_time'   => isset($payload['timestamp']) ? date('Y-m-d H:i:s', (int) $payload['timestamp']) : $now,
+                ':created_at'   => $now,
+            ]);
+            send_to_zabbix($ZBX_SENDER_BIN, $ZBX_SERVER, $ZBX_PORT, $hostname, [
+                'ddosguard.firewall.rate'  => 1,
+                'ddosguard.block.firewall' => json_encode($payload, JSON_UNESCAPED_UNICODE),
+            ]);
+            respond(200, ['ok' => true]);
+        }
         break;
 
     case 'block_antivirus':
