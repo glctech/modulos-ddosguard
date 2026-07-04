@@ -208,6 +208,17 @@ switch ($event_type) {
             'ddosguard.attacks.rate'  => $payload['attempts'] ?? 1,
             'ddosguard.attack.event'  => json_encode($payload, JSON_UNESCAPED_UNICODE),
         ]);
+
+        // Correlação automática e classificação de severidade (v2)
+        if (file_exists(__DIR__ . '/correlator.php')) {
+            require_once __DIR__ . '/correlator.php';
+            DDoSCorrelator::process($pdo, $payload, $hostname, [
+                'ZBX_SENDER_BIN' => $ZBX_SENDER_BIN,
+                'ZBX_SERVER'     => $ZBX_SERVER,
+                'ZBX_PORT'       => $ZBX_PORT,
+            ]);
+        }
+
         respond(200, ['ok' => true]);
         break;
 

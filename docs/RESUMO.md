@@ -372,3 +372,75 @@ zbx_ddos_guard/
     ├── INSTALL.md                        # Guia de instalação completo
     └── RESUMO.md                         # Este arquivo
 ```
+
+---
+
+## Fase 9 — SOC Completo: Correlação, MITRE ATT&CK e Integrações
+
+### O que foi adicionado (sem alterar a estrutura existente)
+
+#### Motor de correlação automática (`scripts/correlator.php`)
+
+- **Classificação de severidade dinâmica** (1-10):
+  | Score | Label | Critérios |
+  |---|---|---|
+  | 1-2 | info | 1 fonte, < 5 tentativas |
+  | 3-4 | low | 1 fonte, 5-50 tentativas |
+  | 5-6 | medium | 2 fontes ou > 50 tentativas |
+  | 7-8 | high | 3+ fontes ou > 200 tentativas |
+  | 9-10 | critical | Múltiplas fontes + reincidência |
+
+- **Correlação automática por IP** em janela de 2h — agrupa eventos de diferentes fontes no mesmo incidente
+- **Escalada de severidade** — score sobe conforme chegam eventos de novas fontes
+- **Classificação MITRE ATT&CK** automática por tipo de ataque:
+  - `BRUTE_FORCE_SSH` → T1110.001 (Credential Access)
+  - `BRUTE_FORCE_RDP` → T1110 (Credential Access)
+  - `SYN_FLOOD` → T1498.001 (Impact)
+  - `SQL_INJECTION` → T1190 (Initial Access)
+  - `MALWARE` → T1204 (Execution)
+  - `C2_COMMUNICATION` → T1071 (Command and Control)
+- **Verificação de Threat Intelligence** via tabela `ddosguard_threat_intel`
+
+#### Migration do banco (`sql/migration_v2_soc.sql`)
+
+Novas tabelas (sem alterar as existentes):
+- `ddosguard_correlations` — grupos de incidentes correlacionados
+- `ddosguard_integration_events` — eventos brutos das integrações externas
+- `ddosguard_threat_intel` — blacklists de IPs
+- View `ddosguard_active_incidents` — incidentes não resolvidos
+
+Novas colunas em `ddosguard_attacks`:
+`severity_label`, `severity_score`, `correlated`, `correlation_id`,
+`mitre_tactic`, `mitre_technique`, `threat_intel`, `threat_intel_src`, `updated_at`
+
+> **Atenção:** MySQL 5.7/8.0 não suporta `IF NOT EXISTS` no `ALTER TABLE`.
+> Execute as colunas manualmente se a migration falhar:
+> ```sql
+> ALTER TABLE ddosguard_attacks ADD COLUMN severity_label VARCHAR(16) NULL, ...
+> ```
+
+#### Bug corrigido durante implantação
+
+A chave primária de `ddosguard_attacks` é `attack_id` (não `id`).
+O `UPDATE` no correlator usava `ORDER BY id DESC` e nunca encontrava o registro.
+Corrigido para `ORDER BY attack_id DESC`.
+
+#### Integrações externas (`scripts/integrations/`)
+
+| Arquivo | Plataforma | Método |
+|---|---|---|
+| `wazuh_receiver.php` | Wazuh HIDS/SIEM | Hook de integração nativa |
+| `suricata_receiver.php` | Suricata IDS/IPS | eve.json via forwarder Python |
+| `syslog_receiver.php` | pfSense + FortiGate | Syslog UDP/TCP via rsyslog |
+| `install_integrations.sh` | Todas | Instalador automático |
+
+#### Resultado validado em produção
+
+```
+IP: 185.220.101.50 (Alemanha)
+Fontes detectadas: ["agent","fail2ban","suricata"]
+Total de eventos: 5
+Severidade final: critical (9)
+MITRE: Credential Access / T1110.001 (Brute Force: Password Guessing)
+Correlation ID: 089d4266-fcd5-4d11-abc9-8e9e16dd2209
+```
