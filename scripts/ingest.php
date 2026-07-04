@@ -226,7 +226,7 @@ switch ($event_type) {
         // Deduplica: se ja existe bloqueio do mesmo IP nos ultimos 60s, apenas
         // incrementa o contador em vez de inserir uma linha nova por pacote.
         $src_ip = $payload['src_ip'] ?? '';
-        $stmt = $pdo->prepare("SELECT id FROM ddosguard_blocks
+        $stmt = $pdo->prepare("SELECT block_id FROM ddosguard_blocks
             WHERE hostid=:hostid AND src_ip=:src_ip AND block_source='firewall'
               AND event_time >= NOW() - INTERVAL 60 SECOND
             LIMIT 1");
@@ -236,7 +236,7 @@ switch ($event_type) {
         if ($existing) {
             // Ja existe — apenas atualiza o timestamp para manter ativo
             $pdo->prepare("UPDATE ddosguard_blocks SET event_time=NOW(), updated_at=NOW()
-                WHERE id=:id")->execute([':id' => $existing['id']]);
+                WHERE block_id=:id")->execute([':id' => $existing['block_id']]);
             respond(200, ['ok' => true]);
         } else {
             $stmt = $pdo->prepare("INSERT INTO ddosguard_blocks
