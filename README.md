@@ -3,6 +3,17 @@
 Módulo completo (template + agente coletor multiplataforma + API + dashboard)
 para detectar, em tempo real, ataques DDoS / força bruta / malware.
 
+
+## Imagens
+
+<img width="1748" height="406" alt="image" src="https://github.com/user-attachments/assets/0836e02a-9d60-464f-b50a-5ca14372aaec" />
+
+<img width="1726" height="330" alt="image" src="https://github.com/user-attachments/assets/11a1b4f5-5a6e-44b2-a402-24d7c73d8977" />
+
+<img width="1736" height="271" alt="image" src="https://github.com/user-attachments/assets/46a92f88-a85d-4af9-9613-653c2fe1ec5d" />
+
+
+
 ## O que detecta
 
 **Linux** (via leitura de logs):
