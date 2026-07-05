@@ -455,3 +455,153 @@ ufw allow from 192.168.0.52 to any  # permite só o appliance
 
 6. O Zabbix Server avalia os itens trapper e dispara triggers quando os
    thresholds são atingidos (pico de ataques, DDoS distribuído etc.).
+
+---
+
+## 12. Templates FortiGate e FortiSwitch
+
+### Importar
+
+**Administration → Templates → Import** →
+selecione `templates/template_ddos_guard_fortigate.yaml`
+
+Dois templates serão importados:
+- `DDoS Guard - FortiGate Security`
+- `DDoS Guard - FortiSwitch Security`
+
+### FortiGate — configuração mínima
+
+**No Zabbix:** associe **ambos** os templates no host FortiGate:
+- `FortiGate by SNMP` (template oficial — coleta SNMP)
+- `DDoS Guard - FortiGate Security` (triggers de segurança + syslog)
+
+**No FortiGate:**
+```
+config log syslogd setting
+  set status enable
+  set server IP_DO_APPLIANCE_ZABBIX
+  set port 514
+  set format default
+  set facility local7
+end
+
+config log syslogd filter
+  set severity warning
+  set forward-traffic enable
+end
+```
+
+**No appliance Zabbix** (habilita receiver syslog):
+```bash
+bash scripts/integrations/install_integrations.sh --syslog
+```
+
+### FortiSwitch — configuração
+
+**Gerenciado pelo FortiGate:**
+FortiGate → WiFi & Switch Controller → Managed FortiSwitches →
+Edit switch → Logging → Enable remote logging → IP do appliance
+
+**Standalone:**
+```
+config log syslogd setting
+  set status enable
+  set server IP_DO_APPLIANCE_ZABBIX
+  set port 514
+end
+```
+
+### Macros configuráveis por dispositivo
+
+No Zabbix, em cada host FortiGate, ajuste as macros:
+
+| Macro | Padrão | Descrição |
+|---|---|---|
+| `{$FG.IPS.BLOCK.WARN}` | 100 | Bloqueios IPS/min → WARNING |
+| `{$FG.IPS.BLOCK.HIGH}` | 1000 | Bloqueios IPS/min → HIGH |
+| `{$FG.SESSION.WARN}` | 50000 | Sessões ativas → WARNING |
+| `{$FG.SESSION.HIGH}` | 100000 | Sessões ativas → HIGH |
+| `{$FG.VPN.LOSS.WARN}` | 20 | % perda de pacotes VPN → WARNING |
+| `{$FSW.PORT.VIOLATIONS.WARN}` | 10 | Violações port security → HIGH |
+| `{$FSW.MAC.SPOOF.WARN}` | 5 | Eventos MAC spoofing → HIGH |
+| `{$FSW.DOT1X.FAIL.WARN}` | 20 | Falhas 802.1X → WARNING |
+
+---
+
+## 13. Configuração de auditoria Windows Server
+
+Execute no DNS-SERVER (ou em qualquer Windows Server monitorado):
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\scripts\setup_windows_audit.ps1
+```
+
+O script usa GUIDs universais para habilitar auditoria — funciona em
+qualquer idioma do Windows (PT-BR, EN-US, ES, etc.).
+
+O que é habilitado:
+- Logon/Logoff failures → Event ID 4625 (brute-force RDP/SMB)
+- Account Lockout → Event ID 4740
+- Credential Validation → NTLM/Kerberos failures
+- WFP Packet Drop → Event ID 5152 (Windows Firewall)
+- WFP Connection → Event ID 5157
+- Canal Windows Firewall Advanced Security
+- Canal Windows Defender Operational
+- Log de firewall em `%SystemRoot%\System32\LogFiles\Firewall\pfirewall.log`
+
+---
+
+## 14. Correção do ClamAV (Rocky Linux / RHEL)
+
+Se o ClamAV apresentar erro `Can't allocate memory` ou `Malformed database`:
+
+```bash
+bash scripts/fix_clamav.sh
+```
+
+O script:
+1. Para os serviços do ClamAV
+2. Remove arquivos de banco corrompidos
+3. Executa `freshclam` para baixar definições novas
+4. Corrige o caminho do log no `agent.conf`
+   (`clamav_log = /var/log/clamav/clamd.log`)
+5. Testa com arquivo EICAR e confirma detecção
+6. Reinicia o agente DDoS Guard
+
+---
+
+## 15. Migration v2 — MySQL 5.7 compatível
+
+A migration `sql/migration_v2_soc.sql` usa uma PROCEDURE helper para
+adicionar colunas de forma idempotente (pode ser executada múltiplas
+vezes sem erro):
+
+```bash
+mysql -u zabbix_srv -p zabbix < sql/migration_v2_soc.sql
+```
+
+Se preferir executar manualmente (MySQL sem permissão de CREATE PROCEDURE):
+
+```sql
+-- ddosguard_attacks
+ALTER TABLE ddosguard_attacks
+  ADD COLUMN severity_label   VARCHAR(16)  NULL,
+  ADD COLUMN severity_score   TINYINT      NULL DEFAULT 0,
+  ADD COLUMN correlated       TINYINT(1)   NOT NULL DEFAULT 0,
+  ADD COLUMN correlation_id   VARCHAR(64)  NULL,
+  ADD COLUMN mitre_tactic     VARCHAR(64)  NULL,
+  ADD COLUMN mitre_technique  VARCHAR(16)  NULL,
+  ADD COLUMN threat_intel     TINYINT(1)   NOT NULL DEFAULT 0,
+  ADD COLUMN threat_intel_src VARCHAR(64)  NULL,
+  ADD COLUMN updated_at       DATETIME     NULL;
+
+-- ddosguard_blocks
+ALTER TABLE ddosguard_blocks
+  ADD COLUMN severity_score   TINYINT      NULL DEFAULT 0,
+  ADD COLUMN correlated       TINYINT(1)   NOT NULL DEFAULT 0,
+  ADD COLUMN correlation_id   VARCHAR(64)  NULL,
+  ADD COLUMN source_platform  VARCHAR(32)  NULL,
+  ADD COLUMN mitre_technique  VARCHAR(16)  NULL,
+  ADD COLUMN updated_at       DATETIME     NULL;
+```

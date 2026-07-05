@@ -86,8 +86,12 @@ zbx_ddos_guard/
 ├── modules/
 │   ├── DDoSAttackMonitor/               # Widget: painel de ataques
 │   └── DDoSBlockMonitor/                # Widget: painel de bloqueios
+├── scripts/
+│   ├── setup_windows_audit.ps1          # Configura auditoria Windows Server
+│   └── fix_clamav.sh                    # Corrige ClamAV corrompido (Rocky Linux)
 └── docs/
-    └── INSTALL.md                       # Guia de instalação passo a passo
+    ├── INSTALL.md                       # Guia de instalação passo a passo
+    └── RESUMO.md                        # Histórico completo do desenvolvimento
 ```
 
 ## Fluxo completo

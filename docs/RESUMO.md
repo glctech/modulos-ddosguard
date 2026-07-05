@@ -9,12 +9,14 @@ desenvolvimento do módulo DDoS Guard para Zabbix 7.4.11.
 
 | Métrica | Valor |
 |---|---|
-| Fases do projeto | 8 |
-| Bugs corrigidos | 15+ |
+| Fases do projeto | 11 |
+| Bugs corrigidos | 20+ |
 | Hosts monitorados | 3 (appliance, webserver1, prx02) |
 | Sistemas operacionais | 2 (Rocky Linux 8 + Ubuntu 22/24 + Windows Server) |
-| Arquivos entregues | 24 |
+| Arquivos entregues | 50 |
 | Bloqueios detectados ao vivo | 255.036+ |
+| Templates criados | 5 |
+| Integrações externas | 4 (Wazuh, Suricata, pfSense, FortiGate) |
 
 ---
 
@@ -444,3 +446,179 @@ Severidade final: critical (9)
 MITRE: Credential Access / T1110.001 (Brute Force: Password Guessing)
 Correlation ID: 089d4266-fcd5-4d11-abc9-8e9e16dd2209
 ```
+
+---
+
+## Fase 10 — Templates FortiGate e FortiSwitch
+
+### Motivação
+
+A análise do template oficial `FortiGate by SNMP` (Zabbix 7.4) revelou que ele
+cobre bem a infraestrutura (CPU, memória, HA, interfaces) mas não tem nenhuma
+trigger de segurança baseada nos contadores IPS/VPN/sessões. Os templates DDoS
+Guard complementam o template SNMP sem duplicar coleta.
+
+### Templates criados
+
+#### `DDoS Guard - FortiGate Security`
+
+Arquivo: `templates/template_ddos_guard_fortigate.yaml`
+
+**8 itens | 7 triggers | 9 macros**
+
+| Item | Tipo | Descrição |
+|---|---|---|
+| `ddosguard.firewall.rate` | TRAP | Bloqueios/min via syslog |
+| `ddosguard.attack.event` | TRAP | Evento JSON de ataque via syslog |
+| `ddosguard.block.firewall` | TRAP | Evento JSON de bloqueio via syslog |
+| `ddosguard.block.antivirus` | TRAP | Detecção AV do FortiGate via syslog |
+| `ddosguard.fg.ips.blocks.rate` | CALCULATED | Taxa IPS/min calculada sobre SNMP |
+| `ddosguard.fg.sessions.alert` | CALCULATED | Sessões ativas calculadas sobre SNMP |
+| `ddosguard.fg.vpn.down` | CALCULATED | Túneis VPN ativos calculados sobre SNMP |
+| `ddosguard.agent.heartbeat` | TRAP | Pipeline syslog→DDoS Guard ativo |
+
+**Triggers:**
+- Pico de bloqueios IPS ≥ `{$FG.IPS.BLOCK.WARN}` (WARNING)
+- Ataque detectado pelo IPS ≥ `{$FG.IPS.BLOCK.HIGH}` (HIGH)
+- Saturação de sessões ≥ `{$FG.SESSION.HIGH}` (HIGH)
+- Alto número de sessões ≥ `{$FG.SESSION.WARN}` (WARNING)
+- Queda de mais de 2 túneis VPN (HIGH)
+- Volume crítico de bloqueios via syslog (HIGH)
+- Pipeline DDoS Guard parado há 30min (WARNING)
+
+**Como usar:**
+```
+1. Associe "FortiGate by SNMP" no host (SNMP polling)
+2. Associe "DDoS Guard - FortiGate Security" no mesmo host
+3. Configure syslog no FortiGate:
+   config log syslogd setting
+     set status enable
+     set server IP_DO_APPLIANCE
+     set port 514
+   end
+```
+
+#### `DDoS Guard - FortiSwitch Security`
+
+Arquivo: `templates/template_ddos_guard_fortigate.yaml` (mesmo arquivo)
+
+**7 itens | 6 triggers | 3 macros**
+
+Detecta via syslog eventos específicos de switches:
+
+| Item | Trigger | Prioridade |
+|---|---|---|
+| `ddosguard.fsw.port.violations` | Port security violation ≥ 10 em 5min | HIGH |
+| `ddosguard.fsw.mac.spoof` | MAC Spoofing ≥ 5 eventos em 5min | HIGH |
+| `ddosguard.fsw.dot1x.failures` | 802.1X failures ≥ 20 em 5min | WARNING |
+| `ddosguard.fsw.loop.detected` | Qualquer loop detectado | **DISASTER** |
+| `ddosguard.firewall.rate` | Volume alto de bloqueios | HIGH |
+| `ddosguard.agent.heartbeat` | Pipeline parado há 30min | WARNING |
+
+### Abordagem técnica
+
+O template FortiGate usa dois mecanismos complementares:
+
+1. **Itens CALCULATED** — cruzam dados do template SNMP existente sem
+   duplicar coleta. Ex: `change(//ips.blocked[fgIpsIntrusionsBlocked.0])`
+   calcula a taxa de bloqueios IPS por minuto a partir do contador SNMP.
+
+2. **Itens TRAPPER** — recebem eventos em tempo real via `syslog_receiver.php`
+   quando o FortiGate envia logs de bloqueio/ataque por syslog UDP 514.
+
+### Configuração de syslog no FortiSwitch (gerenciado)
+
+```
+# Via FortiGate > WiFi & Switch Controller > Managed FortiSwitches
+# Edit switch > Logging > Enable remote logging
+
+# Ou via CLI do FortiSwitch standalone:
+config log syslogd setting
+  set status enable
+  set server IP_DO_APPLIANCE_ZABBIX
+  set port 514
+end
+```
+
+---
+
+## Fase 11 — Finalização e scripts de manutenção
+
+### Scripts adicionados
+
+#### `scripts/setup_windows_audit.ps1`
+
+Configura auditoria de segurança em Windows Server para detecção pelo agente
+DDoS Guard. Habilita via GUID (funciona em PT-BR e EN-US):
+
+- **Logon/Logoff** — Event ID 4625 (logon falhado) via GUID `{0CCE9215-...}`
+- **Account Lockout** — bloqueio de conta
+- **Credential Validation** — validação NTLM/Kerberos
+- **WFP Packet Drop** — Event ID 5152 (Windows Filtering Platform)
+- **WFP Connection** — Event ID 5157
+- Canal `Microsoft-Windows-Windows Firewall With Advanced Security/Firewall`
+- Canal `Microsoft-Windows-Windows Defender/Operational`
+- Configura log de firewall em arquivo (`pfirewall.log`)
+- Reinicia o agente DDoS Guard automaticamente
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\scripts\setup_windows_audit.ps1
+```
+
+#### `scripts/fix_clamav.sh`
+
+Corrige banco de dados corrompido do ClamAV no appliance Rocky Linux:
+
+- Para os serviços do ClamAV
+- Remove arquivos corrompidos (`main.cld`, `daily.cld` etc.)
+- Verifica espaço em disco (mínimo 500MB)
+- Corrige permissões (`clamupdate:clamupdate`)
+- Executa `freshclam` para baixar definições novas
+- Corrige o `clamav_log` no `agent.conf` para `/var/log/clamav/clamd.log`
+- Testa com arquivo EICAR e verifica detecção
+- Reinicia o agente DDoS Guard
+
+```bash
+bash /root/zbx_ddos_guard/scripts/fix_clamav.sh
+```
+
+#### `sql/migration_v2_soc.sql` — versão corrigida
+
+Reescrita para compatibilidade com **MySQL 5.7, 8.0 e MariaDB 10.x**.
+O MySQL 5.7 não suporta `IF NOT EXISTS` no `ALTER TABLE` — a nova versão
+usa uma PROCEDURE helper que verifica `information_schema.COLUMNS` antes
+de adicionar cada coluna:
+
+```sql
+DROP PROCEDURE IF EXISTS ddosguard_add_column;
+CREATE PROCEDURE ddosguard_add_column(IN tbl, IN col, IN col_def)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS ...) THEN
+        SET @sql = CONCAT('ALTER TABLE ', tbl, ' ADD COLUMN ', col, ' ', col_def);
+        PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+    END IF;
+END;
+```
+
+A procedure é removida automaticamente ao final da migration.
+
+### Bugs corrigidos nesta fase
+
+| Bug | Causa | Correção |
+|---|---|---|
+| `block_firewall` retornava HTTP 500 | `SELECT id FROM ddosguard_blocks` — PK é `block_id` | Corrigido para `SELECT block_id` e `WHERE block_id=:id` |
+| `correlator.php` não atualizava `ddosguard_attacks` | `ORDER BY id DESC` — PK é `attack_id` | Corrigido para `ORDER BY attack_id DESC` |
+| `Migration v2` falhava no MySQL 5.7 | `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` não suportado | Reescrito com PROCEDURE helper |
+| `clamav_log` errado no `agent.conf` | Caminho `clamav.log` em vez de `clamd.log` | Corrigido no `fix_clamav.sh` |
+| ClamAV `Can't allocate memory` | Banco de dados corrompido (`main.cld`) | `fix_clamav.sh` remove e atualiza |
+
+### Estado final dos templates
+
+| Template | Arquivo | Hosts | Status |
+|---|---|---|---|
+| `DDoS Guard - Security Monitoring` | `template_ddos_guard.yaml` | Appliance (servidor) | ✅ Produção |
+| `DDoS Guard - Agent` | `template_ddos_guard_agent.yaml` | Linux monitorados | ✅ Produção |
+| `DDoS Guard - Agent Windows Server` | `template_ddos_guard_agent_windows.yaml` | Windows Server | ✅ Produção |
+| `DDoS Guard - FortiGate Security` | `template_ddos_guard_fortigate.yaml` | FortiGate | ✅ Pronto |
+| `DDoS Guard - FortiSwitch Security` | `template_ddos_guard_fortigate.yaml` | FortiSwitch | ✅ Pronto |
