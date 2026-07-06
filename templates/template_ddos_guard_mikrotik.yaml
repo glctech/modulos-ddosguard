@@ -1,0 +1,496 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+    - uuid: 36bff6c29af64692839d077febfc7079
+      name: 'Templates/Network devices'
+    - uuid: 2e5f1dfa8c4f4762a99fa47b4b8249bc
+      name: 'Templates/Security'
+  templates:
+
+    # ==================================================================
+    # DDoS Guard - MikroTik Security
+    # ==================================================================
+    # Complementa qualquer template "MikroTik by SNMP" com:
+    #   - Triggers de seguranca baseadas nos itens SNMP existentes
+    #     (CPU, memoria, interfaces, bandwidth)
+    #   - Itens trapper para receber eventos via syslog
+    #   - Itens CALCULATED para detectar DDoS/flood por taxa de trafego
+    #   - Macros configuráveis por equipamento
+    #
+    # Uso:
+    #   1. Associe o template MikroTik especifico pelo modelo (SNMP)
+    #   2. Associe "DDoS Guard - MikroTik Security" no mesmo host
+    #   3. Configure syslog no MikroTik:
+    #      /system logging action
+    #        set [find name=remote] remote=IP_DO_APPLIANCE remote-port=514
+    #        set [find name=remote] target=remote
+    #      /system logging
+    #        add topics=firewall action=remote
+    #        add topics=critical action=remote
+    #        add topics=warning action=remote
+    #
+    # Compativel com: Zabbix 7.4+ | RouterOS 6.x / 7.x
+    # Modelos suportados: CCR, CRS, hEX, RB, CSS, CAPsMAN
+    # ==================================================================
+    - uuid: f9eef0040b774554a30f003c583696dd
+      template: 'DDoS Guard - MikroTik Security'
+      name: 'DDoS Guard - MikroTik Security'
+      description: |
+        Template de seguranca DDoS Guard para equipamentos MikroTik.
+        Complementa o template SNMP especifico do modelo com triggers
+        de seguranca, deteccao de flood/DDoS e receiver de syslog.
+
+        CONFIGURACAO SYSLOG NO MIKROTIK (RouterOS):
+          # Define o destino do syslog
+          /system logging action
+            set [find name=remote] remote=IP_DO_APPLIANCE_ZABBIX
+            set [find name=remote] remote-port=514
+            set [find name=remote] target=remote
+
+          # Habilita topicos de seguranca
+          /system logging
+            add topics=firewall action=remote
+            add topics=critical action=remote
+            add topics=warning action=remote
+            add topics=interface action=remote
+
+          # Verifica
+          /system logging action print
+
+        CONFIGURACAO FIREWALL LOGGING NO MIKROTIK:
+          # Loga conexoes bloqueadas (address-list blackhole, drops)
+          /ip firewall filter
+            add chain=forward action=log log-prefix="DG-DROP:" \
+                connection-state=invalid comment="DDoS Guard: loga invalidos"
+            add chain=input action=log log-prefix="DG-SCAN:" \
+                protocol=tcp tcp-flags=fin,psh,urg,!syn comment="DDoS Guard: loga port scan"
+
+          # Loga tentativas de brute-force SSH
+          /ip firewall filter
+            add chain=input action=log log-prefix="DG-BRUTE:" \
+                protocol=tcp dst-port=22,8291 \
+                connection-limit=5,32 comment="DDoS Guard: brute-force"
+
+        CONFIGURACAO SNMP:
+          /snmp
+            set enabled=yes
+            set community=public
+          /snmp community
+            set [find name=public] addresses=IP_DO_APPLIANCE/32
+
+        Requer: template SNMP do modelo associado no mesmo host
+        Compativel com: RouterOS 6.49+ e 7.x
+      groups:
+        - name: 'Templates/Network devices'
+        - name: 'Templates/Security'
+
+      macros:
+        - macro: '{$MTK.CPU.WARN}'
+          value: '80'
+          description: '% CPU para trigger WARNING (DDoS consome CPU do firewall)'
+        - macro: '{$MTK.CPU.HIGH}'
+          value: '95'
+          description: '% CPU para trigger HIGH (equipamento saturado)'
+        - macro: '{$MTK.MEM.WARN}'
+          value: '85'
+          description: '% Memoria para trigger WARNING'
+        - macro: '{$MTK.CONN.WARN}'
+          value: '50000'
+          description: 'Conexoes ativas para trigger WARNING (connection tracking)'
+        - macro: '{$MTK.CONN.HIGH}'
+          value: '100000'
+          description: 'Conexoes ativas para trigger HIGH'
+        - macro: '{$MTK.BW.FLOOD.WARN}'
+          value: '900000000'
+          description: 'Bandwidth bits/s para trigger WARNING (900 Mbps = ~flood)'
+        - macro: '{$MTK.FIREWALL.BLOCK.WARN}'
+          value: '500'
+          description: 'Bloqueios de firewall/min para trigger WARNING'
+        - macro: '{$MTK.FIREWALL.BLOCK.HIGH}'
+          value: '5000'
+          description: 'Bloqueios de firewall/min para trigger HIGH (DDoS)'
+        - macro: '{$MTK.BRUTE.WARN}'
+          value: '20'
+          description: 'Tentativas brute-force SSH/Winbox por 5min para HIGH'
+        - macro: '{$MTK.HEARTBEAT.TIMEOUT}'
+          value: '30m'
+          description: 'Tempo sem heartbeat do syslog para trigger WARNING'
+
+      items:
+
+        # ----------------------------------------------------------------
+        # Itens CALCULATED sobre SNMP existente
+        # ----------------------------------------------------------------
+
+        # CPU — DDoS consome CPU do firewall/NAT
+        - uuid: 195ec2e6e5724d308726e27650311b44
+          name: 'DDoS Guard: CPU utilization alert'
+          type: CALCULATED
+          key: 'ddosguard.mtk.cpu.util'
+          delay: 1m
+          params: 'last(//system.cpu.util[,idle])'
+          value_type: FLOAT
+          units: '%'
+          history: 30d
+          description: |
+            Utilizacao de CPU calculada sobre o item SNMP do template MikroTik.
+            Alta CPU pode indicar ataque DDoS saturando o firewall/NAT/routing.
+            Requer item CPU do template MikroTik by SNMP associado.
+          tags:
+            - tag: component
+              value: cpu
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: 2360d411dc5d485ea2d816f3ae673863
+              expression: 'avg(/DDoS Guard - MikroTik Security/ddosguard.mtk.cpu.util,5m)>={$MTK.CPU.HIGH}'
+              name: 'MikroTik: CPU critica em {HOST.NAME} (>={$MTK.CPU.HIGH}%)'
+              priority: HIGH
+              description: |
+                CPU do MikroTik acima do limite critico por 5 minutos.
+                Em roteadores/firewalls, CPU alta indica:
+                  - Ataque DDoS saturando o connection tracking
+                  - Flood de pacotes sobrecarregando o firewall
+                  - Excesso de regras NAT/filter sendo processadas
+                Verifique: /tool profile no terminal do MikroTik
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: e1e32e067c9743b8ab0a870392bb2914
+              expression: 'avg(/DDoS Guard - MikroTik Security/ddosguard.mtk.cpu.util,5m)>={$MTK.CPU.WARN}'
+              name: 'MikroTik: CPU elevada em {HOST.NAME} (>={$MTK.CPU.WARN}%)'
+              priority: WARNING
+              manual_close: 'YES'
+              dependencies:
+                - name: 'MikroTik: CPU critica em {HOST.NAME} (>={$MTK.CPU.HIGH}%)'
+                  expression: 'avg(/DDoS Guard - MikroTik Security/ddosguard.mtk.cpu.util,5m)>={$MTK.CPU.HIGH}'
+              tags:
+                - tag: scope
+                  value: availability
+
+        # Memoria — connection tracking esgota memoria rapidamente em DDoS
+        - uuid: 10ae3d4b7887475b872369f9bffc545e
+          name: 'DDoS Guard: Memory utilization alert'
+          type: CALCULATED
+          key: 'ddosguard.mtk.mem.util'
+          delay: 1m
+          params: 'last(//vm.memory.util[memoryUsedPercentage.Memory])'
+          value_type: FLOAT
+          units: '%'
+          history: 30d
+          description: |
+            Utilizacao de memoria calculada sobre o item SNMP do template MikroTik.
+            Memoria alta em DDoS ocorre por esgotamento do connection tracking table.
+            Requer item Memory utilization do template MikroTik by SNMP.
+          tags:
+            - tag: component
+              value: memory
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: 523d6bf07681472babb08f9b636cf557
+              expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.mem.util)>={$MTK.MEM.WARN}'
+              name: 'MikroTik: Memoria critica em {HOST.NAME} (>={$MTK.MEM.WARN}%)'
+              priority: HIGH
+              description: |
+                Memoria do MikroTik acima do limite.
+                Em ataques DDoS, o connection tracking table esgota a RAM.
+                Verifique:
+                  /ip firewall connection print count-only
+                  /system resource print
+                Acao: aumentar o timeout do connection tracking ou ativar
+                address-list para bloquear IPs atacantes.
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+
+        # Bandwidth — detecta flood por saturacao de interface
+        - uuid: d425ed03965548f4b5c194cfe742b417
+          name: 'DDoS Guard: Interface bandwidth flood detection'
+          type: CALCULATED
+          key: 'ddosguard.mtk.bw.flood'
+          delay: 1m
+          params: 'max(//net.if.in[ifHCInOctets.1],5m) * 8'
+          value_type: FLOAT
+          units: 'bps'
+          history: 30d
+          description: |
+            Deteccao de flood por saturacao de bandwidth na interface principal.
+            Calcula bits/s recebidos na interface WAN (ifIndex 1).
+            Ajuste o indice se necessario: ifHCInOctets.1 -> ifHCInOctets.N
+            Requer item de interface do template MikroTik by SNMP.
+          tags:
+            - tag: component
+              value: network
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: a46cb509e3a748c0ad5a4044df5a7f2a
+              expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.bw.flood)>={$MTK.BW.FLOOD.WARN}'
+              name: 'MikroTik: Possivel flood de bandwidth em {HOST.NAME}'
+              priority: HIGH
+              description: |
+                Bandwidth de entrada proximo ou acima de 900 Mbps.
+                Possivel ataque UDP/ICMP flood saturando a WAN.
+                Verifique:
+                  /interface monitor-traffic [interface=ether1] once
+                  /ip firewall connection print count-only
+                Acao: ativar bloqueio upstream com o ISP se confirmado.
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
+
+        # ----------------------------------------------------------------
+        # Itens TRAPPER — recebem eventos do syslog_receiver.php
+        # ----------------------------------------------------------------
+
+        - uuid: c8a14a5ef45f447e83d63264f8bc76ac
+          name: 'DDoS Guard: MikroTik firewall blocks per minute'
+          type: TRAP
+          key: 'ddosguard.firewall.rate'
+          value_type: UNSIGNED
+          history: 30d
+          description: |
+            Bloqueios de firewall por minuto recebidos via syslog do MikroTik.
+            Populado pelo syslog_receiver.php quando o MikroTik envia logs
+            com prefixo DG-DROP, DG-SCAN, DG-BRUTE ou action=drop/reject.
+          tags:
+            - tag: component
+              value: firewall
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: 9ba7d2732a854c7ea8d4843933dc799c
+              expression: 'min(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.HIGH}'
+              name: 'MikroTik: Volume critico de bloqueios em {HOST.NAME} (>={$MTK.FIREWALL.BLOCK.HIGH}/min)'
+              priority: HIGH
+              description: |
+                Firewall do MikroTik bloqueando volume critico de pacotes.
+                Padrao tipico de ataque DDoS ou port scan massivo.
+                Verifique:
+                  /log print where topics~"firewall"
+                  /ip firewall connection print count-only
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
+            - uuid: 97b9b80e230e43cf9ecbd5f9fb6d4812
+              expression: 'min(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.WARN}'
+              name: 'MikroTik: Alto volume de bloqueios em {HOST.NAME} (>={$MTK.FIREWALL.BLOCK.WARN}/min)'
+              priority: WARNING
+              manual_close: 'YES'
+              dependencies:
+                - name: 'MikroTik: Volume critico de bloqueios em {HOST.NAME} (>={$MTK.FIREWALL.BLOCK.HIGH}/min)'
+                  expression: 'min(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.HIGH}'
+              tags:
+                - tag: scope
+                  value: security
+
+        - uuid: 608a5fe2252044c8b2fdae439a6c1e54
+          name: 'DDoS Guard: MikroTik attack event (JSON)'
+          type: TRAP
+          key: 'ddosguard.attack.event'
+          value_type: TEXT
+          history: 7d
+          description: |
+            Evento JSON de ataque detectado via syslog do MikroTik.
+            Inclui: src_ip, country, attack_type, target_port, protocol,
+            firewall_rule, log_prefix (DG-DROP, DG-SCAN, DG-BRUTE).
+          tags:
+            - tag: component
+              value: ddos
+            - tag: source
+              value: mikrotik
+
+        - uuid: db07b8fe8f234b97a828d5c6d909e928
+          name: 'DDoS Guard: MikroTik block event (JSON)'
+          type: TRAP
+          key: 'ddosguard.block.firewall'
+          value_type: TEXT
+          history: 7d
+          description: |
+            Evento JSON de bloqueio do firewall MikroTik via syslog.
+            Inclui: src_ip, country, tool=mikrotik, rule, target_port,
+            protocol, log_prefix, action.
+          tags:
+            - tag: component
+              value: firewall
+            - tag: source
+              value: mikrotik
+
+        - uuid: 17af9faf2eac4480b637af86684fb20e
+          name: 'DDoS Guard: MikroTik brute-force events'
+          type: TRAP
+          key: 'ddosguard.mtk.bruteforce'
+          value_type: UNSIGNED
+          history: 30d
+          description: |
+            Tentativas de brute-force SSH/Winbox detectadas pelo syslog.
+            Prefixo DG-BRUTE: no log do MikroTik.
+            Configure no MikroTik:
+              /ip firewall filter
+                add chain=input action=log log-prefix="DG-BRUTE:"
+                    protocol=tcp dst-port=22,8291
+                    connection-limit=5,32
+          tags:
+            - tag: component
+              value: ddos
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: 0a5731aeec1943358daea6eb9168c461
+              expression: 'sum(/DDoS Guard - MikroTik Security/ddosguard.mtk.bruteforce,5m)>={$MTK.BRUTE.WARN}'
+              name: 'MikroTik: Brute-force SSH/Winbox detectado em {HOST.NAME}'
+              priority: HIGH
+              description: |
+                Multiplas tentativas de brute-force em SSH (22) ou Winbox (8291).
+                Acao recomendada:
+                  1. Adicione o IP a uma address-list de blackhole:
+                     /ip firewall address-list add list=blackhole address=IP timeout=1d
+                  2. Considere mudar a porta SSH/Winbox
+                  3. Habilite port-knocking ou VPN para acesso remoto
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
+
+        # Port scan detection
+        - uuid: 77348a8a19b246b89416e24b91c16ebd
+          name: 'DDoS Guard: MikroTik port scan events'
+          type: TRAP
+          key: 'ddosguard.mtk.portscan'
+          value_type: UNSIGNED
+          history: 30d
+          description: |
+            Port scans detectados pelo syslog (prefixo DG-SCAN:).
+            Pacotes TCP com flags FIN+PSH+URG sem SYN (XMAS scan)
+            ou outros padroes anomalos.
+          tags:
+            - tag: component
+              value: ddos
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: 938a3751d30d4954a3b9fa3ff7cd4517
+              expression: 'sum(/DDoS Guard - MikroTik Security/ddosguard.mtk.portscan,5m)>=10'
+              name: 'MikroTik: Port scan detectado em {HOST.NAME}'
+              priority: WARNING
+              description: |
+                Padroes de port scan detectados (TCP flags anomalos).
+                O IP de origem pode estar mapeando servicos ativos.
+                Verifique o item "raw attack event" para o IP de origem.
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
+
+        # Connection tracking — esgotamento em DDoS
+        - uuid: f5164c6e2593455b9298e7c69a0cba62
+          name: 'DDoS Guard: MikroTik connection table usage'
+          type: TRAP
+          key: 'ddosguard.mtk.connections'
+          value_type: UNSIGNED
+          history: 30d
+          description: |
+            Numero de conexoes ativas no connection tracking do MikroTik.
+            Enviado pelo syslog_receiver.php quando detecta alertas de
+            conexoes no log do MikroTik.
+            Em ataques DDoS SYN flood, o connection tracking esgota rapidamente.
+          tags:
+            - tag: component
+              value: network
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: cd586f87216140008c59064ae6a98589
+              expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.connections)>={$MTK.CONN.HIGH}'
+              name: 'MikroTik: Connection tracking saturado em {HOST.NAME} (>={$MTK.CONN.HIGH})'
+              priority: DISASTER
+              description: |
+                Connection tracking table quase cheio.
+                Em ataques SYN flood, isso causa negacao de servico total.
+                Acao IMEDIATA:
+                  1. /ip firewall connection remove [find]  (limpa conexoes)
+                  2. Reduza o tcp-syn-received-timeout:
+                     /ip firewall connection tracking set tcp-syn-received-timeout=5s
+                  3. Ative protecao SYN:
+                     /ip settings set tcp-syncookies=yes
+                  4. Bloqueie o IP atacante upstream
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: fa0e20559243416ab555ffd6ed9102bc
+              expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.connections)>={$MTK.CONN.WARN}'
+              name: 'MikroTik: Alto numero de conexoes em {HOST.NAME} (>={$MTK.CONN.WARN})'
+              priority: WARNING
+              manual_close: 'YES'
+              dependencies:
+                - name: 'MikroTik: Connection tracking saturado em {HOST.NAME} (>={$MTK.CONN.HIGH})'
+                  expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.connections)>={$MTK.CONN.HIGH}'
+              tags:
+                - tag: scope
+                  value: availability
+
+        # Heartbeat do pipeline syslog
+        - uuid: 8f2de1379802494a9bdf0bcba4baace4
+          name: 'DDoS Guard: MikroTik syslog heartbeat'
+          type: TRAP
+          key: 'ddosguard.agent.heartbeat'
+          value_type: UNSIGNED
+          history: 7d
+          description: |
+            Heartbeat do pipeline syslog MikroTik -> syslog_receiver.php.
+            Confirma que o MikroTik esta enviando logs e o receiver esta ativo.
+          tags:
+            - tag: component
+              value: monitoring
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: 59054259fe7b422b8168ca25d55479ee
+              expression: 'nodata(/DDoS Guard - MikroTik Security/ddosguard.agent.heartbeat,{$MTK.HEARTBEAT.TIMEOUT})=1'
+              name: 'MikroTik: Pipeline syslog parou em {HOST.NAME}'
+              priority: WARNING
+              description: |
+                O MikroTik nao envia logs ha mais de {$MTK.HEARTBEAT.TIMEOUT}.
+                Verifique:
+                  1. Syslog no MikroTik: /system logging action print
+                  2. rsyslog no appliance: systemctl status rsyslog
+                  3. Porta 514 UDP acessivel: /tool bandwidth-test
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+
+        # IPs distintos — detecta DDoS distribuido
+        - uuid: 41af5951d9e14f6a889fe1459ca4fa2e
+          name: 'DDoS Guard: distinct source IPs (last 5 min)'
+          type: TRAP
+          key: 'ddosguard.distinct_ips.rate'
+          value_type: UNSIGNED
+          history: 30d
+          description: |
+            Numero de IPs de origem distintos nos ultimos 5 minutos.
+            Pico subito indica ataque DDoS distribuido (botnet).
+          tags:
+            - tag: component
+              value: ddos
+            - tag: source
+              value: mikrotik
+          triggers:
+            - uuid: 6f4ce4469275424e92e1144dfa5822f8
+              expression: 'min(/DDoS Guard - MikroTik Security/ddosguard.distinct_ips.rate,5m)>=50'
+              name: 'MikroTik: Ataque distribuido detectado em {HOST.NAME} (>=50 IPs distintos)'
+              priority: DISASTER
+              description: |
+                Muitos IPs distintos atacando simultaneamente.
+                Padrao tipico de botnet / DDoS distribuido.
+                Acione mitigacao upstream com o ISP imediatamente.
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
