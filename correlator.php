@@ -293,7 +293,7 @@ class DDoSCorrelator
                     updated_at      = NOW()
                 WHERE src_ip = :ip
                   AND hostid = :hostid
-                ORDER BY id DESC
+                ORDER BY attack_id DESC
                 LIMIT 1
             ")->execute([
                 ':score'     => $score,
