@@ -622,3 +622,58 @@ A procedure é removida automaticamente ao final da migration.
 | `DDoS Guard - Agent Windows Server` | `template_ddos_guard_agent_windows.yaml` | Windows Server | ✅ Produção |
 | `DDoS Guard - FortiGate Security` | `template_ddos_guard_fortigate.yaml` | FortiGate | ✅ Pronto |
 | `DDoS Guard - FortiSwitch Security` | `template_ddos_guard_fortigate.yaml` | FortiSwitch | ✅ Pronto |
+
+---
+
+## Fase 12 — Suporte Debian 12/13 e correções de campo (v2)
+
+Implantação em produção num appliance **Debian 13 + Zabbix 7.4.11**
+(Apache porta 6030, MariaDB) revelou 6 bugs e 3 falhas de segurança.
+
+### Bugs corrigidos
+
+| # | Sintoma | Causa raiz | Correção |
+|---|---|---|---|
+| 1.1 | `401 invalid token` com token correto | `/etc/zabbix/ddosguard/ingest.config.php` era `root:root 640` — `www-data` não conseguia ler | `chown root:www-data` + `chmod 640` + teste `sudo -u www-data cat` no instalador |
+| 1.2 | Ingest ~20s / `timed out` no agente | `DG_ZBX_SERVER = 'IP:6030'` — `zabbix_sender` interpreta a string inteira como hostname | `DG_ZBX_SERVER = '127.0.0.1'`; setup.py e instalador detectam e corrigem automaticamente |
+| 1.3 | `processed: 0; failed: 1` no zabbix_sender | Nome **visível** (`Zabbix Server`) ≠ nome **técnico** (`debian`) | Instalador avisa no prompt; diagnóstico com query SQL incluído |
+| 1.4 | Frontend caiu após `ufw enable` | `ufw --force enable` antes das regras — sem liberar porta 6030 | Ordem corrigida: regras → enable; porta extraída da URL do ingest |
+| 1.5 | `freshclam: Failed to lock the log file` | Daemon `clamav-freshclam` já segura o lock | Instalador usa `systemctl enable --now clamav-freshclam`; nunca chama `freshclam` manualmente |
+| 1.6 | `AH00558` no error.log do Apache | ServerName não configurado | `ServerName $(hostname)` em `conf-available/servername.conf` |
+
+### Falhas de segurança corrigidas
+
+| # | Risco | Correção |
+|---|---|---|
+| 2.1 | `chmod -R 777 /etc/zabbix/*` aplicado como workaround do 401 | Modelo definitivo de permissões (ver tabela abaixo); `install_debian_prereqs.sh` restaura idempotentemente |
+| 2.2 | Symlink `ingest.config.php` dentro do webroot | Removido; instalador e prereqs.sh removem qualquer cópia/symlink no docroot |
+| 2.3 | `chmod 777` em logs | Padronizado `644`; nota sobre logrotate adicionada |
+
+**Modelo definitivo de permissões:**
+
+| Arquivo | Dono:Grupo | Modo |
+|---|---|---|
+| `/etc/zabbix/ddosguard/ingest.config.php` | `root:www-data` | `640` |
+| `/etc/zabbix/ddos_guard_agent.conf` | `root:root` | `600` |
+| `/etc/zabbix/zabbix_server.conf` | `root:zabbix` | `640` |
+| Logs (`kern.log`, `auth.log` etc.) | `root:adm` | `644` |
+
+### Novas dependências Debian
+
+| Pacote | Situação anterior | Agora |
+|---|---|---|
+| `rsyslog` | Não mencionado | Instalado e habilitado (sem ele não existem `kern.log`/`auth.log`) |
+| `ufw` | Assumido presente | Instalado automaticamente |
+| `clamav-daemon` | Sempre instalado | **Condicional a RAM ≥ 6GiB** (~1GiB residente) |
+| `python3-geoip2` | Opcional/ignorado | `pip3 --break-system-packages`; sem a base, `ip-api.com` pode travar coleta |
+
+### Arquivos criados/atualizados
+
+- **`scripts/install_agent_linux.sh` v2** — reescrito com 10 etapas estruturadas,
+  suporte a Debian/RHEL, sanidade do servidor, testes finais com diagnóstico
+- **`scripts/install_debian_prereqs.sh`** — novo, idempotente, correção de appliances
+  já implantados com `chmod 777` ou configurações incorretas
+- **`scripts/setup.py`** — corrigido: valida `DG_ZBX_SERVER` e remove `:porta`
+  automaticamente se presente na resposta
+- **`docs/CHANGELOG.md`** — registro completo das mudanças da v2
+- **`docs/INSTALL.md`** — seções 16-18 adicionadas (Debian, problemas frequentes, permissões)

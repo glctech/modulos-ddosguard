@@ -65,8 +65,6 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 Veja o guia completo em **[`docs/INSTALL.md`](docs/INSTALL.md)**.
 
-Veja o Resumo completo em **[`docs/RESUMO.md`](docs/RESUMO.md)**.
-
 ## Estrutura do pacote
 
 ```

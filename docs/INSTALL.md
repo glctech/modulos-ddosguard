@@ -605,3 +605,137 @@ ALTER TABLE ddosguard_blocks
   ADD COLUMN mitre_technique  VARCHAR(16)  NULL,
   ADD COLUMN updated_at       DATETIME     NULL;
 ```
+
+---
+
+## 16. Suporte a Debian 12/13
+
+O Debian minimal difere do Rocky Linux em vários pontos que quebravam a instalação.
+Execute o script de prereqs antes do instalador:
+
+```bash
+sudo bash scripts/install_debian_prereqs.sh [--web-port 6030] [--mgmt-net 192.168.0.0/24]
+```
+
+### Diferenças críticas
+
+| Dependência | Debian | Rocky Linux |
+|---|---|---|
+| `rsyslog` | **Precisa instalar** (Debian 12+ usa só journald; sem rsyslog não há `auth.log`/`kern.log`) | Já presente |
+| `ufw` | **Precisa instalar** | N/A (usa firewalld) |
+| `fail2ban` | `apt install fail2ban` | `dnf install epel-release && dnf install fail2ban` |
+| `clamav-daemon` | **Condicional a RAM ≥ 6GiB** (~1GiB residente) | `clamd@scan` |
+| Log do ClamAV | `/var/log/clamav/clamav.log` **ou** `clamd.log` | `/var/log/clamav/clamd.log` |
+| GeoIP2 | `pip3 install geoip2 --break-system-packages` | `pip3 install geoip2` |
+
+### Ordem correta do UFW (crítico!)
+
+**ERRADO** — causa `ERR_CONNECTION_TIMED_OUT` no frontend:
+```bash
+ufw --force enable          # ← habilita deny incoming SEM liberar as portas
+ufw allow ssh               # ← tarde demais, acesso SSH perdido
+```
+
+**CORRETO** — regras antes do enable:
+```bash
+ufw allow ssh
+ufw allow 80/tcp            # ajuste para a porta real do frontend (ex: 6030)
+ufw allow 10050/tcp         # Zabbix Agent
+ufw allow 10051/tcp         # Zabbix Trapper
+ufw default deny incoming
+ufw default allow outgoing
+ufw --force enable          # ← ativa com todas as portas ja liberadas
+```
+
+> **Atenção:** `ufw allow from 192.168.0.0/24` suprime eventos `[UFW BLOCK]`
+> para toda a rede. Use regras específicas por porta para redes de gerenciamento
+> se precisar detectar bloqueios internos.
+
+---
+
+## 17. Problemas frequentes — novos casos
+
+### `401 invalid token` com token correto nos dois lados
+
+Causa mais provável: **permissão do arquivo de configuração**.
+
+```bash
+# O www-data (PHP) precisa ler o config
+ls -la /etc/zabbix/ddosguard/ingest.config.php
+# Deve ser: -rw-r----- root:www-data
+
+# Correção
+chown root:www-data /etc/zabbix/ddosguard/ingest.config.php
+chmod 640 /etc/zabbix/ddosguard/ingest.config.php
+chmod 755 /etc/zabbix/ddosguard/
+
+# Testa se o www-data consegue ler
+sudo -u www-data cat /etc/zabbix/ddosguard/ingest.config.php | grep TOKEN
+```
+
+Outras causas em ordem de probabilidade:
+
+1. **Symlink do config no webroot** — o `ingest.php` falha em silêncio ao tentar
+   ler `/usr/share/zabbix/ui/ddosguard/ingest.config.php` que é um symlink quebrado:
+   ```bash
+   ls -la /usr/share/zabbix/ui/ddosguard/ingest.config.php
+   # Se existir, remova: rm -f /usr/share/zabbix/ui/ddosguard/ingest.config.php
+   ```
+
+2. **Token diferente nos dois lados:**
+   ```bash
+   diff <(grep TOKEN /etc/zabbix/ddosguard/ingest.config.php) \
+        <(grep token /etc/zabbix/ddos_guard_agent.conf)
+   ```
+
+3. **Erro PHP no include** — verifique:
+   ```bash
+   tail -20 /var/log/nginx/error.log
+   tail -20 /var/log/apache2/error.log
+   ```
+
+### Ingest respondendo ~20s / `Erro no ciclo de coleta: timed out`
+
+Causa: `DG_ZBX_SERVER` contém `IP:porta` (ex: `45.70.216.68:6030`).
+O `zabbix_sender` interpreta a string inteira como hostname e trava 20s.
+
+```bash
+grep DG_ZBX_SERVER /etc/zabbix/ddosguard/ingest.config.php
+# Errado:  'DG_ZBX_SERVER' => '45.70.216.68:6030'
+# Correto: 'DG_ZBX_SERVER' => '127.0.0.1'
+
+# Correção manual
+sed -i "s/'DG_ZBX_SERVER' => '[^']*:[0-9]*'/'DG_ZBX_SERVER' => '127.0.0.1'/" \
+    /etc/zabbix/ddosguard/ingest.config.php
+```
+
+### `freshclam` retorna `Failed to lock the log file`
+
+Comportamento normal — o daemon `clamav-freshclam` já está atualizando e segura o lock.
+**Não rode `freshclam` manualmente** enquanto o daemon estiver ativo:
+
+```bash
+systemctl status clamav-freshclam   # verifica se daemon esta ativo
+journalctl -u clamav-freshclam -n 5 # confirma que esta atualizando normalmente
+```
+
+---
+
+## 18. Modelo de permissões correto
+
+**Nunca use `chmod 777` em arquivos do DDoS Guard** — logs com escrita aberta
+permitem apagar ou forjar evidências de ataque.
+
+| Arquivo | Dono:Grupo | Modo | Por quê |
+|---|---|---|---|
+| `/etc/zabbix/ddosguard/ingest.config.php` | `root:www-data` | `640` | PHP precisa ler; outros não |
+| `/etc/zabbix/ddos_guard_agent.conf` | `root:root` | `600` | Contém o token |
+| `/etc/zabbix/zabbix_server.conf` | `root:zabbix` | `640` | Contém senha do banco |
+| `/etc/zabbix/zabbix.conf.php` | `root:www-data` | `640` | Contém senha do banco |
+| `ingest.php` no webroot | `root:root` | `644` | Só leitura pelo web server |
+| Logs (`kern.log`, `auth.log` etc.) | `root:adm` | `644` | Agente roda como root |
+
+Para restaurar o modelo correto em appliances com `chmod 777` já aplicado:
+```bash
+sudo bash scripts/install_debian_prereqs.sh
+```

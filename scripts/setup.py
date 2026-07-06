@@ -752,10 +752,20 @@ def main():
         "DG_DB_PASS": db_pass,
         "DG_DB_DRIVER": db_driver,
         "DG_ZABBIX_SENDER_BIN": sender_bin,
-        "DG_ZBX_SERVER": ask("Endereço do Zabbix Server (para zabbix_sender)",
-                              default="127.0.0.1", assume_yes=args.yes),
-        "DG_ZBX_PORT": ask("Porta trapper do Zabbix Server", default="10051", assume_yes=args.yes),
     }
+
+    # DG_ZBX_SERVER — nao pode conter :porta (causa timeout de ~20s no ingest)
+    _zbx_server_raw = ask(
+        "Endereço do Zabbix Server para zabbix_sender (so o IP/hostname, SEM :porta)",
+        default="127.0.0.1", assume_yes=args.yes)
+    if ":" in _zbx_server_raw:
+        _zbx_server_clean = _zbx_server_raw.split(":")[0]
+        warn(f"DG_ZBX_SERVER '{_zbx_server_raw}' contem ':porta' — "
+             f"usando apenas '{_zbx_server_clean}' (a porta vai em DG_ZBX_PORT)")
+        _zbx_server_raw = _zbx_server_clean
+    ingest_cfg["DG_ZBX_SERVER"] = _zbx_server_raw
+    ingest_cfg["DG_ZBX_PORT"] = ask(
+        "Porta trapper do Zabbix Server", default="10051", assume_yes=args.yes)
 
     ingest_config_content = render_ingest_config_php(ingest_cfg)
     write_file(DEFAULT_INGEST_CONFIG_PATH, ingest_config_content, args.dry_run, mode=0o640)
