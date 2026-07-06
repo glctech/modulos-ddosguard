@@ -123,7 +123,7 @@ implantação em produção num appliance **Debian 13 + Zabbix 7.4.11**
   | Arquivo | Dono:Grupo | Modo |
   |---|---|---|
   | `/etc/zabbix/ddosguard/ingest.config.php` | `root:www-data` | `640` |
-  | `/etc/zabbix/ddos_guard_agent.conf` (contém token) | `root:root` | `600` |
+  | `/etc/zabbix/ddos_guard_agent.conf` (contém token) | `root:zabbix` | `640` |
   | `/etc/zabbix/zabbix_server.conf` | `root:zabbix` | `640` |
   | `/etc/zabbix/zabbix.conf.php` | `root:www-data` | `640` |
   | `ingest.php` no webroot | `root:root` | `644` |
@@ -191,7 +191,7 @@ Etapas novas ou alteradas:
 4. Prompt do `zbx_host` com aviso **nome técnico ≠ nome visível**
 5. Detecção de logs ampliada (kern/ufw/auth no Debian; messages/secure no
    RHEL; clamd.log **ou** clamav.log) + permissões 644
-6. `agent.conf` gravado com **modo 600** (contém o token)
+6. `agent.conf` gravado com **modo 640** dono `root:zabbix` (legível pelo serviço)
 7. Unit systemd (usa a do repo se existir, senão gera)
 8. Firewall com regras **antes** do enable e porta web extraída da URL
    do ingest; aviso de que `allow from REDE` ampla suprime eventos
@@ -267,3 +267,47 @@ segura e as mesmas validações finais do instalador.
 | Python | 3.x (agente via systemd, como root) |
 | ClamAV | freshclam daemon 1.4.3, clamd ativo (~960 MiB) |
 | Resultado final | Heartbeat e contadores populando; ingest < 1 s; journal sem 401/timeout |
+
+---
+
+## v2.1 — Correções adicionais de campo (2026-07-06)
+
+Bugs encontrados durante implantação no servidor Debian 13 de produção.
+
+### Bugs corrigidos
+
+| # | Sintoma | Causa | Correção |
+|---|---|---|---|
+| 1.7 | Agente usa URL hardcoded (`http://127.0.0.1/ddosguard/ingest.php`) ignorando o `agent.conf` | `agent.conf` com `root:root 600` — usuário `zabbix` (User= no systemd) não conseguia ler | `chown root:zabbix` + `chmod 640` — grupo zabbix pode ler, outros não |
+| 1.8 | `zabbix_sender: command not found` — itens não populam no Zabbix | `zabbix-sender` não vem instalado no Debian por padrão | Adicionado à lista de pacotes do instalador (`apt install zabbix-sender`) |
+| 1.9 | `provision_dashboard.py` timeout ao usar IP:porta externo | IP público (`45.237.78.245:9003`) inacessível de dentro do servidor (NAT/proxy) | Usar `http://localhost/zabbix/` para execução local |
+
+### Modelo de permissões corrigido
+
+O `agent.conf` contém o token de autenticação — precisa ser protegido
+mas legível pelo serviço:
+
+| Arquivo | Dono:Grupo | Modo | Por quê |
+|---|---|---|---|
+| `/etc/zabbix/ddos_guard_agent.conf` | `root:zabbix` | `640` | Token protegido; serviço systemd (User=zabbix) precisa ler |
+
+> **Atenção:** `root:root 600` impede que o usuário `zabbix` leia o arquivo.
+> O agente falha silenciosamente no `configparser.read()` e usa o default
+> hardcoded em vez da URL configurada.
+
+### URL do ingest — local vs externo
+
+| Contexto | URL correta |
+|---|---|
+| Agente no **mesmo servidor** | `http://localhost/zabbix/ddosguard/ingest.php` |
+| Agente em **outro servidor** | `http://IP_PUBLICO:PORTA/zabbix/ddosguard/ingest.php` |
+| `provision_dashboard.py` (local) | `http://localhost/zabbix/` |
+
+### Ambiente de validação v2.1
+
+| Componente | Versão |
+|---|---|
+| SO | Debian 12 (bookworm) |
+| Zabbix | Server + Frontend + Agent 7.4.11 |
+| Frontend | Apache porta 80 (NAT → 9003 externo) |
+| Resultado | Todos os 8 itens populando; correlação ativa; dashboard funcionando |

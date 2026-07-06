@@ -1,61 +1,136 @@
 -- DDoS Guard - Migration v2 - SOC Completo
 -- ============================================
--- Compativel com MySQL 5.7, 8.0 e MariaDB 10.x
--- NAO usa IF NOT EXISTS no ALTER TABLE (nao suportado no MySQL 5.7)
--- Usa procedure para verificar se a coluna ja existe antes de adicionar.
+-- Compativel com MySQL 5.7, MySQL 8.0 e MariaDB 10.x/11.x
+-- Nao usa DELIMITER (incompativel com mysql < arquivo.sql)
+-- Usa IF NOT EXISTS nos CREATE TABLE/VIEW e verificacao manual
+-- via information_schema para os ALTER TABLE.
 --
--- Execute apenas uma vez:
+-- Execute:
 --   mysql -u zabbix_srv -p zabbix < migration_v2_soc.sql
-
-DELIMITER $$
-
--- Helper: adiciona coluna somente se nao existir
-DROP PROCEDURE IF EXISTS ddosguard_add_column$$
-CREATE PROCEDURE ddosguard_add_column(
-    IN tbl VARCHAR(64),
-    IN col VARCHAR(64),
-    IN col_def TEXT
-)
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME   = tbl
-          AND COLUMN_NAME  = col
-    ) THEN
-        SET @sql = CONCAT('ALTER TABLE ', tbl, ' ADD COLUMN ', col, ' ', col_def);
-        PREPARE stmt FROM @sql;
-        EXECUTE stmt;
-        DEALLOCATE PREPARE stmt;
-    END IF;
-END$$
-
-DELIMITER ;
+--
+-- Idempotente: pode ser executado multiplas vezes sem erro.
 
 -- ----------------------------------------------------------------
 -- 1. Novas colunas em ddosguard_attacks
+--    Cada ALTER e condicional via information_schema
 -- ----------------------------------------------------------------
-CALL ddosguard_add_column('ddosguard_attacks', 'severity_label',   "VARCHAR(16)  NULL COMMENT 'info|low|medium|high|critical'");
-CALL ddosguard_add_column('ddosguard_attacks', 'severity_score',   "TINYINT      NULL DEFAULT 0 COMMENT '1-10'");
-CALL ddosguard_add_column('ddosguard_attacks', 'source_count',     "TINYINT      NULL DEFAULT 1");
-CALL ddosguard_add_column('ddosguard_attacks', 'sources_json',     "TEXT         NULL");
-CALL ddosguard_add_column('ddosguard_attacks', 'correlated',       "TINYINT(1)   NOT NULL DEFAULT 0");
-CALL ddosguard_add_column('ddosguard_attacks', 'correlation_id',   "VARCHAR(64)  NULL");
-CALL ddosguard_add_column('ddosguard_attacks', 'mitre_tactic',     "VARCHAR(64)  NULL");
-CALL ddosguard_add_column('ddosguard_attacks', 'mitre_technique',  "VARCHAR(16)  NULL");
-CALL ddosguard_add_column('ddosguard_attacks', 'threat_intel',     "TINYINT(1)   NOT NULL DEFAULT 0");
-CALL ddosguard_add_column('ddosguard_attacks', 'threat_intel_src', "VARCHAR(64)  NULL");
-CALL ddosguard_add_column('ddosguard_attacks', 'updated_at',       "DATETIME     NULL");
+
+-- severity_label
+SET @col = 'severity_label';
+SET @tbl = 'ddosguard_attacks';
+SET @exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = @tbl
+      AND COLUMN_NAME  = @col
+);
+SET @sql = IF(@exists = 0,
+    'ALTER TABLE ddosguard_attacks ADD COLUMN severity_label VARCHAR(16) NULL',
+    'SELECT ''severity_label ja existe'' AS info'
+);
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- severity_score
+SET @col = 'severity_score';
+SET @exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'ddosguard_attacks'
+      AND COLUMN_NAME  = @col
+);
+SET @sql = IF(@exists = 0,
+    'ALTER TABLE ddosguard_attacks ADD COLUMN severity_score TINYINT NULL DEFAULT 0',
+    'SELECT ''severity_score ja existe'' AS info'
+);
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- source_count
+SET @col = 'source_count';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN source_count TINYINT NULL DEFAULT 1','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- sources_json
+SET @col = 'sources_json';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN sources_json TEXT NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- correlated
+SET @col = 'correlated';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN correlated TINYINT(1) NOT NULL DEFAULT 0','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- correlation_id
+SET @col = 'correlation_id';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN correlation_id VARCHAR(64) NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- mitre_tactic
+SET @col = 'mitre_tactic';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN mitre_tactic VARCHAR(64) NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- mitre_technique
+SET @col = 'mitre_technique';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN mitre_technique VARCHAR(16) NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- threat_intel
+SET @col = 'threat_intel';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN threat_intel TINYINT(1) NOT NULL DEFAULT 0','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- threat_intel_src
+SET @col = 'threat_intel_src';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN threat_intel_src VARCHAR(64) NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- updated_at
+SET @col = 'updated_at';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD COLUMN updated_at DATETIME NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
 -- ----------------------------------------------------------------
 -- 2. Novas colunas em ddosguard_blocks
 -- ----------------------------------------------------------------
-CALL ddosguard_add_column('ddosguard_blocks', 'severity_score',   "TINYINT      NULL DEFAULT 0");
-CALL ddosguard_add_column('ddosguard_blocks', 'correlated',       "TINYINT(1)   NOT NULL DEFAULT 0");
-CALL ddosguard_add_column('ddosguard_blocks', 'correlation_id',   "VARCHAR(64)  NULL");
-CALL ddosguard_add_column('ddosguard_blocks', 'source_platform',  "VARCHAR(32)  NULL");
-CALL ddosguard_add_column('ddosguard_blocks', 'mitre_technique',  "VARCHAR(16)  NULL");
-CALL ddosguard_add_column('ddosguard_blocks', 'updated_at',       "DATETIME     NULL");
+
+SET @col = 'severity_score';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_blocks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_blocks ADD COLUMN severity_score TINYINT NULL DEFAULT 0','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+SET @col = 'correlated';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_blocks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_blocks ADD COLUMN correlated TINYINT(1) NOT NULL DEFAULT 0','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+SET @col = 'correlation_id';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_blocks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_blocks ADD COLUMN correlation_id VARCHAR(64) NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+SET @col = 'source_platform';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_blocks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_blocks ADD COLUMN source_platform VARCHAR(32) NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+SET @col = 'mitre_technique';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_blocks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_blocks ADD COLUMN mitre_technique VARCHAR(16) NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+SET @col = 'updated_at';
+SET @exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_blocks' AND COLUMN_NAME=@col);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_blocks ADD COLUMN updated_at DATETIME NULL','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
 -- ----------------------------------------------------------------
 -- 3. Tabela de correlacao de eventos
@@ -121,7 +196,7 @@ CREATE TABLE IF NOT EXISTS ddosguard_integration_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------
--- 5. Tabela de threat intelligence / blacklists
+-- 5. Tabela de threat intelligence
 -- ----------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ddosguard_threat_intel (
     id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -146,36 +221,33 @@ CREATE TABLE IF NOT EXISTS ddosguard_threat_intel (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------
--- 6. Indices adicionais para performance
+-- 6. Indices adicionais (condicionais via information_schema)
 -- ----------------------------------------------------------------
-DROP PROCEDURE IF EXISTS ddosguard_add_index$$
 
-DELIMITER $$
-CREATE PROCEDURE ddosguard_add_index(
-    IN tbl VARCHAR(64),
-    IN idx VARCHAR(64),
-    IN cols VARCHAR(128)
-)
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.STATISTICS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME   = tbl
-          AND INDEX_NAME   = idx
-    ) THEN
-        SET @sql = CONCAT('ALTER TABLE ', tbl, ' ADD INDEX ', idx, ' (', cols, ')');
-        PREPARE stmt FROM @sql;
-        EXECUTE stmt;
-        DEALLOCATE PREPARE stmt;
-    END IF;
-END$$
-DELIMITER ;
+SET @idx = 'idx_severity_score';
+SET @exists = (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND INDEX_NAME=@idx);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD INDEX idx_severity_score (severity_score)','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
-CALL ddosguard_add_index('ddosguard_attacks', 'idx_severity_score', 'severity_score');
-CALL ddosguard_add_index('ddosguard_attacks', 'idx_correlation_id', 'correlation_id');
-CALL ddosguard_add_index('ddosguard_attacks', 'idx_correlated',     'correlated');
-CALL ddosguard_add_index('ddosguard_blocks',  'idx_correlation_id', 'correlation_id');
-CALL ddosguard_add_index('ddosguard_blocks',  'idx_source_platform','source_platform');
+SET @idx = 'idx_correlation_id';
+SET @exists = (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND INDEX_NAME=@idx);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD INDEX idx_correlation_id (correlation_id)','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+SET @idx = 'idx_correlated';
+SET @exists = (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_attacks' AND INDEX_NAME=@idx);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_attacks ADD INDEX idx_correlated (correlated)','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+SET @idx = 'idx_correlation_id';
+SET @exists = (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_blocks' AND INDEX_NAME=@idx);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_blocks ADD INDEX idx_correlation_id (correlation_id)','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+SET @idx = 'idx_source_platform';
+SET @exists = (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ddosguard_blocks' AND INDEX_NAME=@idx);
+SET @sql = IF(@exists=0,'ALTER TABLE ddosguard_blocks ADD INDEX idx_source_platform (source_platform)','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
 -- ----------------------------------------------------------------
 -- 7. View de incidentes ativos
@@ -199,9 +271,5 @@ SELECT
 FROM ddosguard_correlations c
 WHERE c.resolved = 0
 ORDER BY c.severity_score DESC, c.last_seen DESC;
-
--- Limpa as procedures auxiliares
-DROP PROCEDURE IF EXISTS ddosguard_add_column;
-DROP PROCEDURE IF EXISTS ddosguard_add_index;
 
 SELECT 'Migration v2 SOC concluida com sucesso.' AS status;

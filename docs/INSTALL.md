@@ -729,7 +729,7 @@ permitem apagar ou forjar evidências de ataque.
 | Arquivo | Dono:Grupo | Modo | Por quê |
 |---|---|---|---|
 | `/etc/zabbix/ddosguard/ingest.config.php` | `root:www-data` | `640` | PHP precisa ler; outros não |
-| `/etc/zabbix/ddos_guard_agent.conf` | `root:root` | `600` | Contém o token |
+| `/etc/zabbix/ddos_guard_agent.conf` | `root:zabbix` | `640` | Contém o token |
 | `/etc/zabbix/zabbix_server.conf` | `root:zabbix` | `640` | Contém senha do banco |
 | `/etc/zabbix/zabbix.conf.php` | `root:www-data` | `640` | Contém senha do banco |
 | `ingest.php` no webroot | `root:root` | `644` | Só leitura pelo web server |

@@ -654,7 +654,7 @@ Implantação em produção num appliance **Debian 13 + Zabbix 7.4.11**
 | Arquivo | Dono:Grupo | Modo |
 |---|---|---|
 | `/etc/zabbix/ddosguard/ingest.config.php` | `root:www-data` | `640` |
-| `/etc/zabbix/ddos_guard_agent.conf` | `root:root` | `600` |
+| `/etc/zabbix/ddos_guard_agent.conf` | `root:zabbix` | `640` |
 | `/etc/zabbix/zabbix_server.conf` | `root:zabbix` | `640` |
 | Logs (`kern.log`, `auth.log` etc.) | `root:adm` | `644` |
 

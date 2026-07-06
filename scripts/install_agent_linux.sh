@@ -97,7 +97,7 @@ else
         # Debian 12/13 minimal nao tem rsyslog — sem ele nao existem kern.log e auth.log
         apt-get update -q 2>/dev/null || true
         $INSTALL python3 python3-pip curl rsyslog ufw fail2ban \
-                 clamav clamav-freshclam 2>/dev/null || warn "Alguns pacotes nao instalados"
+                 clamav clamav-freshclam zabbix-sender 2>/dev/null || warn "Alguns pacotes nao instalados"
 
         # Habilita rsyslog (Debian usa journald por padrao)
         systemctl enable --now rsyslog 2>/dev/null && ok "rsyslog habilitado" || true
@@ -127,7 +127,7 @@ else
         # EPEL necessario para fail2ban e clamav
         dnf install -y -q epel-release 2>/dev/null || true
         $INSTALL python3 python3-pip curl rsyslog fail2ban \
-                 clamav clamav-update clamd 2>/dev/null || warn "Alguns pacotes nao instalados"
+                 clamav clamav-update clamd zabbix-sender 2>/dev/null || warn "Alguns pacotes nao instalados"
         pip3 install geoip2 --break-system-packages -q 2>/dev/null || true
         freshclam 2>/dev/null || true
         systemctl enable --now clamd@scan 2>/dev/null || true
@@ -286,8 +286,9 @@ clamav_log = ${CLAMAV_LOG}
 auth_log = ${AUTH_LOG}
 CONF
 
-chmod 600 "$CONF_FILE"   # token nao deve ser legivel por outros usuarios
-ok "Configuracao gravada em $CONF_FILE (modo 600)"
+chmod 640 "$CONF_FILE"   # token protegido — legivel pelo usuario zabbix (grupo)
+chown root:zabbix "$CONF_FILE" 2>/dev/null || chown root:root "$CONF_FILE"
+ok "Configuracao gravada em $CONF_FILE (root:zabbix 640)"
 
 # ── 7. Configura o servico systemd ──────────────────────────────────────────
 step "7. Configurando servico systemd"
