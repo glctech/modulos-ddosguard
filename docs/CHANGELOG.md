@@ -311,3 +311,69 @@ mas legível pelo serviço:
 | Zabbix | Server + Frontend + Agent 7.4.11 |
 | Frontend | Apache porta 80 (NAT → 9003 externo) |
 | Resultado | Todos os 8 itens populando; correlação ativa; dashboard funcionando |
+
+---
+
+## v2.2 — Syslog Forwarder e correções Debian (2026-07-08)
+
+Implantação em ambiente real com detecção de ataque DDoS ativo
+(1.57 Gbps no CONCENTRADOR BORDA) no primeiro dia de uso.
+
+### Novos arquivos
+
+| Arquivo | Descrição |
+|---|---|
+| `scripts/integrations/syslog_forwarder.py` | Forwarder Python que lê `/var/log/ddosguard-syslog.log` e envia ao ingest.php — substitui o `omprog` do rsyslog quando o módulo não está disponível |
+| `templates/template_ddos_guard_mikrotik.yaml` | Template DDoS Guard para MikroTik (11 itens, 12 triggers, 10 macros) |
+| `scripts/integrations/mikrotik_receiver.php` | Receiver syslog específico para MikroTik com parser de log_prefix (DG-DROP, DG-SCAN, DG-BRUTE) |
+
+### Bugs corrigidos
+
+| # | Sintoma | Causa | Correção |
+|---|---|---|---|
+| 1.9 | `install_integrations.sh` retorna erro no Debian | Webroot detectado como `/var/www/html` em vez de `/usr/share/zabbix/ui` | Cópia manual para o caminho correto |
+| 2.0 | `omprog` não disponível no rsyslog 8.x Debian | Módulo separado não instalado por padrão | Substituído por `syslog_forwarder.py` rodando como serviço systemd |
+| 2.1 | Forwarder usa URL externa com timeout | `ingest_url` no `agent.conf` apontava para IP:porta externo | Corrigido para `localhost` + detecção automática |
+| 2.2 | Arquivo do forwarder não criado pelo heredoc | Terminal cortou o heredoc em linha longa | Reescrito com `python3 << 'EOF'` usando raw string |
+| 2.3 | `agent.conf` ilegível pelo usuário `zabbix` | `root:root 600` — `User=zabbix` no systemd não conseguia ler | `chown root:zabbix 640` |
+| 2.4 | `zabbix_sender` não encontrado no Debian | Não instalado por padrão | Adicionado ao instalador: `apt install zabbix-sender` |
+
+### Detecção de ataque real em produção
+
+No primeiro dia de uso em ambiente de produção real (ISP/provedor):
+- **CONCENTRADOR BORDA (MikroTik CCR)** detectou flood de **1.57 Gbps**
+  num link de 200 Mbps — ataque DDoS vindo pelo PPPoE de terceiros
+- O DDoS Guard disparou alerta às **09:31** com histórico de 20+ eventos
+  nos últimos 2 dias (maior evento: 9h 4min de duração)
+- Dashboard SOC registrou **61 eventos, 181 tentativas, 43 IPs distintos**
+  de US, CA, GB, FR, NL, DE, SG atacando o Zabbix Server na porta 3000
+- Relatório HTML gerado automaticamente e enviado ao cliente com
+  evidências com timestamps para acionar o provedor upstream
+
+### Configuração MikroTik para syslog
+
+```
+/system logging action
+  set [find name=remote] remote=IP_DO_ZABBIX remote-port=514 target=remote
+
+/system logging
+  add topics=firewall action=remote
+  add topics=critical action=remote
+
+/ip firewall filter
+  add chain=input action=log log-prefix="DG-BRUTE:" \
+      protocol=tcp dst-port=22,8291 connection-limit=5,32 place-before=0
+  add chain=input action=log log-prefix="DG-DROP:" \
+      connection-state=invalid place-before=0
+  add chain=input action=log log-prefix="DG-SCAN:" \
+      protocol=tcp tcp-flags=fin,psh,urg,!syn place-before=0
+```
+
+### Ambiente de validação v2.2
+
+| Componente | Detalhe |
+|---|---|
+| SO | Debian 12 (bookworm) |
+| Zabbix | 7.4.11 — Apache porta 80 (NAT → 6030/9003 externo) |
+| MikroTik | CCR — CONCENTRADOR BORDA |
+| Resultado | Ataque DDoS real detectado e documentado no primeiro dia |

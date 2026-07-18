@@ -1,0 +1,365 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+    - uuid: 36bff6c29af64692839d077febfc7079
+      name: 'Templates/Network devices'
+    - uuid: 2e5f1dfa8c4f4762a99fa47b4b8249bc
+      name: 'Templates/Security'
+  templates:
+
+    # ==================================================================
+    # DDoS Guard - Sophos Security
+    # ==================================================================
+    # Cobre: Sophos XG / XGS Firewall, Sophos Central, Intercept X
+    # Via:   Syslog UDP 514 (formato SFOS ou CEF)
+    #
+    # Detecta:
+    #   - Firewall Deny (tráfego bloqueado por regra)
+    #   - IPS (intrusão detectada / bloqueada)
+    #   - Anti-Virus (malware detectado)
+    #   - ATP Advanced Threat Protection (C2/botnet)
+    #   - Web Filter (URL maliciosa)
+    #   - Brute-force SSH/RDP
+    #   - SQL Injection / Web Attack
+    #
+    # CONFIGURAÇÃO NO SOPHOS XG/XGS:
+    #   System > Administration > Notification Settings
+    #   Log Settings > Syslog Server > Add
+    #     IP:     IP_DO_APPLIANCE_ZABBIX
+    #     Port:   514
+    #     Format: Device Standard Format (SFOS)
+    #   Log Types: Firewall, IPS, Anti-Virus, ATP, Web Filter, Anti-Spam
+    #
+    # Compatível com: Zabbix 7.4+ | SFOS 18.0+ / 19.0+ / 20.0+
+    # ==================================================================
+    - uuid: a3f9c2e14d7b4a8e9c6f1d3b5e8a2c4f
+      template: 'DDoS Guard - Sophos Security'
+      name: 'DDoS Guard - Sophos Security'
+      description: |
+        Template de segurança DDoS Guard para Sophos XG/XGS Firewall,
+        Sophos Central e Sophos Intercept X.
+
+        Recebe eventos via syslog (formato SFOS ou CEF) e detecta:
+        bloqueios de firewall, intrusões IPS, malware (AV), ameaças ATP
+        (C2/botnet), web filter e brute-force.
+
+        CONFIGURAÇÃO NO SOPHOS XG/XGS (via interface web):
+          System > Administration > Notification Settings
+          > Log Settings > Syslog Server > Add
+            Name:     DDoS Guard
+            IP:       IP_DO_APPLIANCE_ZABBIX
+            Port:     514
+            Facility: LOCAL0
+            Format:   Device Standard Format (SFOS)
+          > Severity: Information
+          > Log Types: ✅ Firewall ✅ IPS ✅ Anti-Virus ✅ ATP ✅ Web Filter
+
+        CONFIGURAÇÃO VIA CLI (SFOS):
+          system syslog add name "DDoSGuard" ipaddress IP_ZABBIX port 514
+          system syslog update name "DDoSGuard" logcomponent all
+          system syslog enable
+
+        CONFIGURAÇÃO CEF (alternativa):
+          System > Administration > Notification Settings
+          > Log Settings > Syslog Server
+            Format: Common Event Format (CEF)
+
+        SOPHOS CENTRAL / INTERCEPT X:
+          O Sophos Central não envia syslog nativo.
+          Opções:
+          1. Instale o Sophos Syslog Forwarder no servidor Windows
+          2. Use a API do Sophos Central + syslog_forwarder.py
+          3. Configure o XG como proxy de logs do Central
+
+        Compatível com: SFOS 18.0+ / 19.0+ / 20.0+
+      groups:
+        - name: 'Templates/Network devices'
+        - name: 'Templates/Security'
+
+      macros:
+        - macro: '{$SOPHOS.FW.BLOCK.WARN}'
+          value: '100'
+          description: 'Bloqueios de firewall/min para trigger WARNING'
+        - macro: '{$SOPHOS.FW.BLOCK.HIGH}'
+          value: '1000'
+          description: 'Bloqueios de firewall/min para trigger HIGH (DDoS)'
+        - macro: '{$SOPHOS.IPS.WARN}'
+          value: '50'
+          description: 'Detecções IPS/min para trigger WARNING'
+        - macro: '{$SOPHOS.IPS.HIGH}'
+          value: '500'
+          description: 'Detecções IPS/min para trigger HIGH'
+        - macro: '{$SOPHOS.AV.WARN}'
+          value: '5'
+          description: 'Detecções de malware em 10min para trigger HIGH'
+        - macro: '{$SOPHOS.ATP.THRESHOLD}'
+          value: '1'
+          description: 'Qualquer detecção ATP dispara trigger DISASTER'
+        - macro: '{$SOPHOS.HEARTBEAT.TIMEOUT}'
+          value: '30m'
+          description: 'Tempo sem syslog para trigger WARNING'
+
+      items:
+
+        # ── Firewall ─────────────────────────────────────────────────
+        - uuid: b1e4f7a2c9d3e6f8a5b2c4d7e9f1a3b5
+          name: 'DDoS Guard: Sophos firewall blocks per minute'
+          type: TRAP
+          key: 'ddosguard.firewall.rate'
+          value_type: UNSIGNED
+          units: '/min'
+          history: 30d
+          description: |
+            Bloqueios de firewall por minuto recebidos via syslog do Sophos XG/XGS.
+            Populado pelo sophos_receiver.php quando detecta log_type=Firewall
+            com status=Deny/Drop no formato SFOS.
+          tags:
+            - tag: component
+              value: firewall
+            - tag: source
+              value: sophos
+          triggers:
+            - uuid: c2f5g8b3d6e9a2b5c8d1e4f7a0b3c6d9
+              expression: 'min(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.HIGH}'
+              name: 'Sophos: Volume crítico de bloqueios em {HOST.NAME} (>={$SOPHOS.FW.BLOCK.HIGH}/min)'
+              priority: HIGH
+              description: |
+                O Sophos XG está bloqueando um volume crítico de conexões.
+                Padrão típico de ataque DDoS ou varredura massiva.
+                Verifique: Monitor > Log Viewer > Firewall
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
+            - uuid: d3g6h9c4e7f0b3c6d9e2f5g8b1c4d7e0
+              expression: 'min(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.WARN}'
+              name: 'Sophos: Alto volume de bloqueios em {HOST.NAME} (>={$SOPHOS.FW.BLOCK.WARN}/min)'
+              priority: WARNING
+              manual_close: 'YES'
+              dependencies:
+                - name: 'Sophos: Volume crítico de bloqueios em {HOST.NAME} (>={$SOPHOS.FW.BLOCK.HIGH}/min)'
+                  expression: 'min(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.HIGH}'
+              tags:
+                - tag: scope
+                  value: security
+
+        - uuid: e4h7i0d5f8g1c4d7e0f3g6h9c2d5e8f1
+          name: 'DDoS Guard: Sophos block event (JSON)'
+          type: TRAP
+          key: 'ddosguard.block.firewall'
+          value_type: TEXT
+          history: 7d
+          description: |
+            Evento JSON do último bloqueio de firewall Sophos.
+            Inclui: src_ip, country, tool, target_port, protocol,
+            log_type, log_subtype (SFOS fields).
+          tags:
+            - tag: component
+              value: firewall
+            - tag: source
+              value: sophos
+
+        # ── IPS ──────────────────────────────────────────────────────
+        - uuid: f5i8j1e6g9h2d5e8f1g4h7i0d3e6f9g2
+          name: 'DDoS Guard: Sophos IPS detections per minute'
+          type: TRAP
+          key: 'ddosguard.attacks.rate'
+          value_type: UNSIGNED
+          units: '/min'
+          history: 30d
+          description: |
+            Detecções do IPS Sophos por minuto.
+            Inclui: SQL Injection, Port Scan, SYN Flood, Web Attacks
+            e outras assinaturas IPS do SFOS.
+          tags:
+            - tag: component
+              value: ips
+            - tag: source
+              value: sophos
+          triggers:
+            - uuid: g6j9k2f7h0i3e6f9g2h5i8j1e4f7g0h3
+              expression: 'min(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.HIGH}'
+              name: 'Sophos: Volume crítico de detecções IPS em {HOST.NAME}'
+              priority: HIGH
+              description: |
+                O IPS do Sophos está detectando um volume crítico de intrusões.
+                Verifique: Monitor > Log Viewer > IPS
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
+            - uuid: h7k0l3g8i1j4f7g0h3i6j9k2f5g8h1i4
+              expression: 'min(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.WARN}'
+              name: 'Sophos: Pico de detecções IPS em {HOST.NAME}'
+              priority: WARNING
+              manual_close: 'YES'
+              dependencies:
+                - name: 'Sophos: Volume crítico de detecções IPS em {HOST.NAME}'
+                  expression: 'min(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.HIGH}'
+              tags:
+                - tag: scope
+                  value: security
+
+        - uuid: i8l1m4h9j2k5g8h1i4j7k0l3g6h9i2j5
+          name: 'DDoS Guard: Sophos attack event (JSON)'
+          type: TRAP
+          key: 'ddosguard.attack.event'
+          value_type: TEXT
+          history: 7d
+          description: |
+            Evento JSON do último ataque detectado pelo Sophos IPS/Web Filter.
+            Inclui: src_ip, country, attack_type, target_port, protocol,
+            severity, mitre_tactic, mitre_tech, message (descrição da assinatura).
+          tags:
+            - tag: component
+              value: ddos
+            - tag: source
+              value: sophos
+
+        # ── Antivírus ─────────────────────────────────────────────────
+        - uuid: j9m2n5i0k3l6h9i2j5k8l1m4h7i0j3k6
+          name: 'DDoS Guard: Sophos AV blocks per minute'
+          type: TRAP
+          key: 'ddosguard.antivirus.rate'
+          value_type: UNSIGNED
+          units: '/min'
+          history: 30d
+          description: |
+            Detecções de malware pelo Sophos Anti-Virus por minuto.
+            Inclui vírus, trojans, ransomware e PUAs bloqueados
+            no tráfego web/email pelo Sophos XG.
+          tags:
+            - tag: component
+              value: antivirus
+            - tag: source
+              value: sophos
+          triggers:
+            - uuid: k0n3o6j1l4m7i0j3k6l9m2n5i8j1k4l7
+              expression: 'sum(/DDoS Guard - Sophos Security/ddosguard.antivirus.rate,10m)>={$SOPHOS.AV.WARN}'
+              name: 'Sophos: Malware detectado em {HOST.NAME} ({$SOPHOS.AV.WARN}+ detecções em 10min)'
+              priority: HIGH
+              description: |
+                O Sophos AV detectou múltiplas ameaças em curto período.
+                Pode indicar infecção ativa ou campanha de malware na rede.
+                Verifique: Monitor > Log Viewer > Anti-Virus
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
+
+        - uuid: l1o4p7k2m5n8j1k4l7m0n3o6j9k2l5m8
+          name: 'DDoS Guard: Sophos AV block event (JSON)'
+          type: TRAP
+          key: 'ddosguard.block.antivirus'
+          value_type: TEXT
+          history: 7d
+          description: |
+            Evento JSON da última detecção de malware pelo Sophos AV.
+            Inclui: src_ip, tool=sophos-av, category=MALWARE,
+            message (nome do vírus/trojan), mitre=T1204.
+          tags:
+            - tag: component
+              value: antivirus
+            - tag: source
+              value: sophos
+
+        # ── ATP — Advanced Threat Protection ─────────────────────────
+        - uuid: m2p5q8l3n6o9k2l5m8n1o4p7k0l3m6n9
+          name: 'DDoS Guard: Sophos ATP event (JSON)'
+          type: TRAP
+          key: 'ddosguard.sophos.atp'
+          value_type: TEXT
+          history: 7d
+          description: |
+            Evento do Advanced Threat Protection (ATP) do Sophos XG.
+            Detecta comunicação C2 (command & control), botnets e
+            tráfego para IPs/domínios maliciosos conhecidos.
+            MITRE ATT&CK: T1071 (Command and Control)
+          tags:
+            - tag: component
+              value: ddos
+            - tag: source
+              value: sophos
+          triggers:
+            - uuid: n3q6r9m4o7p0l3m6n9o2p5q8l1m4n7o0
+              expression: 'nodata(/DDoS Guard - Sophos Security/ddosguard.sophos.atp,1m)=0'
+              name: 'Sophos ATP: Comunicação C2/botnet detectada em {HOST.NAME}'
+              priority: DISASTER
+              description: |
+                O Sophos ATP detectou comunicação com servidor C2 (Command & Control).
+                Isso indica comprometimento ativo de um dispositivo na rede.
+
+                AÇÃO IMEDIATA:
+                  1. Identifique o dispositivo de origem: Monitor > Log Viewer > ATP
+                  2. Isole o dispositivo da rede imediatamente
+                  3. Execute varredura completa com Sophos Intercept X
+                  4. Verifique outros dispositivos na mesma sub-rede
+                  5. Reporte o incidente seguindo o plano de resposta
+
+                MITRE ATT&CK: T1071 — Command and Control
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security
+
+        # ── Heartbeat ─────────────────────────────────────────────────
+        - uuid: o4r7s0n5p8q1m4n7o0p3q6r9m2n5o8p1
+          name: 'DDoS Guard: Sophos syslog heartbeat'
+          type: TRAP
+          key: 'ddosguard.agent.heartbeat'
+          value_type: UNSIGNED
+          history: 7d
+          description: |
+            Heartbeat do pipeline syslog Sophos → DDoS Guard.
+            Confirma que o Sophos XG está enviando logs e que o
+            sophos_receiver.php está processando corretamente.
+          tags:
+            - tag: component
+              value: monitoring
+            - tag: source
+              value: sophos
+          triggers:
+            - uuid: p5s8t1o6q9r2n5o8p1q4r7s0n3o6p9q2
+              expression: 'nodata(/DDoS Guard - Sophos Security/ddosguard.agent.heartbeat,{$SOPHOS.HEARTBEAT.TIMEOUT})=1'
+              name: 'Sophos: Pipeline syslog parou em {HOST.NAME}'
+              priority: WARNING
+              description: |
+                O Sophos XG não envia logs há mais de {$SOPHOS.HEARTBEAT.TIMEOUT}.
+                Verifique:
+                  1. Configuração syslog no Sophos XG:
+                     System > Administration > Notification Settings
+                  2. rsyslog no appliance: systemctl status rsyslog
+                  3. Porta 514 UDP: ss -ulnp | grep 514
+                  4. Arquivo de log: tail /var/log/ddosguard-syslog.log
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+
+        # ── IPs distintos ─────────────────────────────────────────────
+        - uuid: q6t9u2p7r0s3o6p9q2r5s8t1o4p7q0r3
+          name: 'DDoS Guard: distinct source IPs (last 5 min)'
+          type: TRAP
+          key: 'ddosguard.distinct_ips.rate'
+          value_type: UNSIGNED
+          history: 30d
+          description: |
+            Número de IPs de origem distintos nos últimos 5 minutos.
+            Pico súbito indica ataque DDoS distribuído (botnet).
+          tags:
+            - tag: component
+              value: ddos
+            - tag: source
+              value: sophos
+          triggers:
+            - uuid: r7u0v3q8s1t4p7q0r3s6t9u2p5q8r1s4
+              expression: 'min(/DDoS Guard - Sophos Security/ddosguard.distinct_ips.rate,5m)>=30'
+              name: 'Sophos: Ataque distribuído detectado em {HOST.NAME} (>=30 IPs distintos)'
+              priority: HIGH
+              description: |
+                Muitos IPs distintos atacando simultaneamente via Sophos.
+                Padrão típico de botnet / DDoS distribuído.
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: security

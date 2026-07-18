@@ -106,6 +106,29 @@ else
 fi
 
 # ----------------------------------------------------------------
+# Copia o syslog_forwarder.py para /opt/ddosguard
+mkdir -p /opt/ddosguard
+cp "$SCRIPT_DIR/syslog_forwarder.py" /opt/ddosguard/
+chmod +x /opt/ddosguard/syslog_forwarder.py
+
+# Instala servico systemd do forwarder
+cat > /etc/systemd/system/ddosguard-syslog.service << 'UNIT'
+[Unit]
+Description=DDoS Guard Syslog Forwarder
+After=network.target rsyslog.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/ddosguard/syslog_forwarder.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable ddosguard-syslog 2>/dev/null && ok "Servico ddosguard-syslog instalado"
+
 # Copia os receivers para o webroot
 # ----------------------------------------------------------------
 echo ""
