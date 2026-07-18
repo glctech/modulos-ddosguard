@@ -677,3 +677,105 @@ Implantação em produção num appliance **Debian 13 + Zabbix 7.4.11**
   automaticamente se presente na resposta
 - **`docs/CHANGELOG.md`** — registro completo das mudanças da v2
 - **`docs/INSTALL.md`** — seções 16-18 adicionadas (Debian, problemas frequentes, permissões)
+
+---
+
+## Fase 13 — Integração Sophos XG/XGS + Central + Intercept X
+
+### Motivação
+
+Sophos é amplamente usado em empresas médias brasileiras — especialmente
+clínicas, contabilidades e pequenas empresas que adquiriram o Sophos Home
+ou XG via revendedor. A integração permite ao DDoS Guard cobrir ambientes
+Sophos com a mesma qualidade dos templates FortiGate e MikroTik.
+
+### Arquivos criados
+
+| Arquivo | Linhas | Descrição |
+|---|---|---|
+| `scripts/integrations/sophos_receiver.php` | 526 | Receiver com parsers SFOS e CEF |
+| `templates/template_ddos_guard_sophos.yaml` | ~200 | Template Zabbix 9 itens / 8 triggers / 7 macros |
+
+### Dois parsers
+
+#### `parse_sfos()` — formato SFOS (Device Standard Format)
+
+Formato padrão do Sophos XG/XGS. Campos separados por espaço
+no formato `key=value` ou `key="value":
+
+```
+device="SFW" date=2026-07-15 time=10:30:00
+log_type="IPS" log_subtype="Drop" status="Deny"
+src_ip=185.220.101.50 dst_port=22 protocol="TCP"
+message="Brute Force SSH attempt detected"
+```
+
+#### `parse_cef()` — Common Event Format (alternativo)
+
+```
+CEF:0|Sophos|XG|SFOS 20.0|030906209024|Firewall Deny|3|
+src=185.220.101.50 dpt=22 proto=TCP dvchost=sophos-xg
+```
+
+O receiver detecta automaticamente qual formato usar.
+
+### Classificação automática
+
+O receiver classifica cada log em tipo de ataque + MITRE ATT&CK
+baseado nos campos `log_type` e `log_subtype` do SFOS:
+
+```
+Firewall/Deny     → block_firewall      (score 3)
+IPS/Detection     → IPS_DETECTION       (score 6) T1190
+IPS/SYN Flood     → SYN_FLOOD          (score 8) T1498.001
+IPS/SQL Inject    → SQL_INJECTION       (score 6) T1190
+Anti-Virus        → MALWARE            (score 7) T1204
+ATP               → C2_COMMUNICATION   (score 9) T1071  ← DISASTER
+Web Filter        → WEB_ATTACK         (score 4) T1190
+Anti-Spam         → SPAM               (score 2) T1566
+Firewall/port 22  → BRUTE_FORCE_SSH    (score 5) T1110.001
+Firewall/port 3389→ BRUTE_FORCE_RDP    (score 5) T1110
+```
+
+### Destaque: item dedicado para ATP
+
+O Advanced Threat Protection (ATP) do Sophos detecta comunicação
+com servidores C2 (command & control) e botnets. Por ser indicativo
+de comprometimento ativo, recebe tratamento especial:
+
+- Item dedicado `ddosguard.sophos.atp` separado dos demais
+- Score 9/10 → `critical` — máxima prioridade no correlator
+- Trigger **DISASTER** com instruções de resposta a incidente
+- MITRE ATT&CK: T1071 (Command and Control)
+
+### Sophos Central / Intercept X
+
+O Sophos Central não envia syslog nativo — as opções documentadas são:
+
+1. **Sophos Syslog Forwarder** no servidor Windows (mais simples)
+2. **API REST** do Sophos Central + `syslog_forwarder.py`
+3. **Sophos XG como proxy** de logs do Central
+
+### Estado dos templates (6 no total)
+
+| Template | Arquivo | Status |
+|---|---|---|
+| `DDoS Guard - Security Monitoring` | `template_ddos_guard.yaml` | ✅ Produção |
+| `DDoS Guard - Agent` | `template_ddos_guard_agent.yaml` | ✅ Produção |
+| `DDoS Guard - Agent Windows Server` | `template_ddos_guard_agent_windows.yaml` | ✅ Produção |
+| `DDoS Guard - FortiGate Security` | `template_ddos_guard_fortigate.yaml` | ✅ Produção |
+| `DDoS Guard - FortiSwitch Security` | `template_ddos_guard_fortigate.yaml` | ✅ Pronto |
+| `DDoS Guard - MikroTik Security` | `template_ddos_guard_mikrotik.yaml` | ✅ Produção |
+| **`DDoS Guard - Sophos Security`** | **`template_ddos_guard_sophos.yaml`** | **✅ Pronto** |
+
+### Estado das integrações (7 no total)
+
+| Receiver | Plataforma | Formatos |
+|---|---|---|
+| `syslog_receiver.php` | pfSense, FortiGate, genérico | syslog |
+| `mikrotik_receiver.php` | MikroTik CCR/CRS | DG-DROP/DG-SCAN/DG-BRUTE |
+| `sophos_receiver.php` | Sophos XG/XGS, Central, Intercept X | SFOS, CEF |
+| `wazuh_receiver.php` | Wazuh HIDS/SIEM | JSON |
+| `suricata_receiver.php` | Suricata IDS/IPS | eve.json |
+| `syslog_forwarder.py` | Genérico (substitui omprog) | qualquer syslog |
+| `install_integrations.sh` | Todas | — |

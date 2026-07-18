@@ -739,3 +739,205 @@ Para restaurar o modelo correto em appliances com `chmod 777` já aplicado:
 ```bash
 sudo bash scripts/install_debian_prereqs.sh
 ```
+
+---
+
+## 19. Integração Sophos XG/XGS + Central + Intercept X
+
+### Importar o template
+
+**Administration → Templates → Import** →
+selecione `templates/template_ddos_guard_sophos.yaml`
+
+Template importado: `DDoS Guard - Sophos Security`
+
+Associe ao host correspondente no Zabbix (mesmo host do SNMP Sophos,
+se houver, ou crie um host dedicado para o firewall Sophos).
+
+---
+
+### Configuração no Sophos XG/XGS
+
+#### Via interface web (SFOS)
+
+```
+System
+  └── Administration
+        └── Notification Settings
+              └── Log Settings
+                    └── Syslog Server → Add
+
+  Name:     DDoS Guard
+  IP:       IP_DO_APPLIANCE_ZABBIX
+  Port:     514
+  Facility: LOCAL0
+  Format:   Device Standard Format (SFOS)
+  Severity: Information
+
+Log Types habilitados:
+  ✅ Firewall           (bloqueios de regra)
+  ✅ IPS                (intrusões detectadas)
+  ✅ Anti-Virus         (malware no tráfego)
+  ✅ ATP                (Advanced Threat Protection — C2/botnet)
+  ✅ Web Filter         (URLs maliciosas)
+  ✅ Anti-Spam          (e-mail malicioso)
+  ✅ System Health      (alertas do sistema)
+```
+
+#### Via CLI (SFOS)
+
+```bash
+# Adiciona o servidor syslog
+system syslog add name "DDoSGuard" ipaddress IP_ZABBIX port 514
+
+# Habilita todos os componentes de log
+system syslog update name "DDoSGuard" logcomponent all
+
+# Ativa o envio
+system syslog enable
+
+# Verifica
+system syslog show
+```
+
+#### Formato CEF (alternativo)
+
+Se preferir o formato CEF (Common Event Format):
+```
+Format: Common Event Format (CEF)
+```
+O `sophos_receiver.php` detecta automaticamente o formato e usa o parser correto.
+
+---
+
+### Configuração no appliance Zabbix
+
+O syslog já deve estar configurado pelo `install_integrations.sh`.
+Verifique se o receiver Sophos está no lugar:
+
+```bash
+# Copia o receiver para o webroot
+cp scripts/integrations/sophos_receiver.php \
+   /usr/share/zabbix/ui/ddosguard/integrations/
+
+# Confirma que o rsyslog está ouvindo na porta 514
+ss -ulnp | grep 514
+
+# Verifica se os logs chegam
+tail -f /var/log/ddosguard-syslog.log
+
+# Testa o receiver diretamente com uma linha SFOS simulada
+echo '<13>Jul 15 10:30:00 sophos-xg device="SFW" log_type="Firewall" log_subtype="Denied" status="Deny" src_ip=185.220.101.50 dst_port=22 protocol="TCP"' \
+  >> /var/log/ddosguard-syslog.log
+```
+
+---
+
+### Sophos Central / Intercept X
+
+O Sophos Central **não envia syslog nativo**. Use uma das opções:
+
+#### Opção 1 — Sophos Syslog Forwarder (recomendado)
+
+Instale o Sophos Syslog Forwarder em um servidor Windows
+gerenciado pelo Sophos Central:
+
+```
+Sophos Central → Endpoint Protection → Policies
+→ Threat Protection → Syslog settings
+  Server: IP_DO_APPLIANCE_ZABBIX
+  Port:   514
+  Format: CEF
+```
+
+#### Opção 2 — API REST do Sophos Central
+
+Use a API para buscar eventos e encaminhar via syslog_forwarder.py.
+Requer Client ID e Client Secret do Sophos Central:
+
+```bash
+# Configura as credenciais
+cat >> /etc/zabbix/ddos_guard_agent.conf << 'EOF'
+
+[sophos_central]
+client_id     = SEU_CLIENT_ID
+client_secret = SEU_CLIENT_SECRET
+tenant_id     = SEU_TENANT_ID
+EOF
+```
+
+---
+
+### Macros configuráveis por host Sophos
+
+No Zabbix, em cada host Sophos, ajuste conforme o ambiente:
+
+| Macro | Padrão | Descrição |
+|---|---|---|
+| `{$SOPHOS.FW.BLOCK.WARN}` | 100 | Bloqueios firewall/min → WARNING |
+| `{$SOPHOS.FW.BLOCK.HIGH}` | 1000 | Bloqueios firewall/min → HIGH |
+| `{$SOPHOS.IPS.WARN}` | 50 | Detecções IPS/min → WARNING |
+| `{$SOPHOS.IPS.HIGH}` | 500 | Detecções IPS/min → HIGH |
+| `{$SOPHOS.AV.WARN}` | 5 | Detecções AV em 10min → HIGH |
+| `{$SOPHOS.ATP.THRESHOLD}` | 1 | Qualquer ATP → DISASTER |
+| `{$SOPHOS.HEARTBEAT.TIMEOUT}` | 30m | Sem syslog → WARNING |
+
+---
+
+### Verificação pós-configuração
+
+```bash
+# 1. Confirma que os logs chegam
+tail -f /var/log/ddosguard-syslog.log | grep -i sophos
+
+# 2. Testa o receiver via curl
+curl -s http://localhost/zabbix/ddosguard/integrations/sophos_receiver.php \
+  -H "Content-Type: application/json" \
+  -H "X-DG-Token: SEU_TOKEN" \
+  -d 'device="SFW" log_type="IPS" log_subtype="Drop" src_ip=185.220.101.50 dst_port=80 protocol="TCP"'
+
+# 3. Verifica no banco
+mysql -u zabbix_srv -p zabbix -e "
+SELECT platform, src_ip, category, severity_label, created_at
+FROM ddosguard_integration_events
+WHERE platform='sophos'
+ORDER BY id DESC LIMIT 5;"
+
+# 4. Verifica no Zabbix
+# Latest data → host Sophos → filtrar por "ddos"
+# Os itens ddosguard.firewall.rate e ddosguard.attacks.rate
+# devem começar a receber dados
+```
+
+---
+
+### Diagrama do fluxo
+
+```
+Sophos XG/XGS
+  │
+  │ syslog UDP 514 (SFOS ou CEF)
+  ▼
+rsyslog (appliance Zabbix)
+  │
+  │ grava em /var/log/ddosguard-syslog.log
+  ▼
+syslog_forwarder.py
+  │
+  │ POST http://localhost/zabbix/ddosguard/integrations/sophos_receiver.php
+  ▼
+sophos_receiver.php
+  │
+  ├── parse_sfos() ou parse_cef()
+  ├── classifica: Firewall/IPS/AV/ATP/WebFilter
+  ├── grava em ddosguard_integration_events
+  ├── grava em ddosguard_blocks ou ddosguard_attacks
+  ├── correlator.php → score MITRE ATT&CK
+  └── zabbix_sender → itens do template Sophos
+        │
+        ▼
+      Zabbix Server
+        │
+        ▼
+      Dashboard DDoS Guard SOC
+```

@@ -377,3 +377,89 @@ No primeiro dia de uso em ambiente de produção real (ISP/provedor):
 | Zabbix | 7.4.11 — Apache porta 80 (NAT → 6030/9003 externo) |
 | MikroTik | CCR — CONCENTRADOR BORDA |
 | Resultado | Ataque DDoS real detectado e documentado no primeiro dia |
+
+---
+
+## v2.3 — Integração Sophos XG/XGS + Central + Intercept X (2026-07-15)
+
+### Novos arquivos
+
+| Arquivo | Descrição |
+|---|---|
+| `scripts/integrations/sophos_receiver.php` | Receiver syslog para Sophos — parseia formato SFOS e CEF, classifica por log_type e envia ao ingest.php |
+| `templates/template_ddos_guard_sophos.yaml` | Template Zabbix com 9 itens, 8 triggers e 7 macros para Sophos XG/XGS |
+
+### Produtos suportados
+
+| Produto | Método | Formato |
+|---|---|---|
+| Sophos XG / XGS Firewall | Syslog UDP 514 | SFOS (Device Standard Format) |
+| Sophos XG / XGS Firewall | Syslog UDP 514 | CEF (Common Event Format) |
+| Sophos Central | Via Syslog Forwarder Windows | JSON → SFOS |
+| Sophos Intercept X | Via Syslog Forwarder Windows | JSON → SFOS |
+
+### Detecções implementadas
+
+| Log Sophos (log_type) | Tipo DDoS Guard | MITRE | Score |
+|---|---|---|---|
+| Firewall / Deny | `block_firewall` | — | 3 |
+| IPS / Detection | `IPS_DETECTION` | T1190 | 6 |
+| IPS / SYN Flood | `SYN_FLOOD` | T1498.001 | 8 |
+| IPS / SQL Inject | `SQL_INJECTION` | T1190 | 6 |
+| IPS / Port Scan | `PORT_SCAN` | T1595 | 4 |
+| Anti-Virus | `MALWARE` | T1204 | 7 |
+| **ATP** | **`C2_COMMUNICATION`** | **T1071** | **9** |
+| Web Filter | `WEB_ATTACK` | T1190 | 4 |
+| Anti-Spam | `SPAM` | T1566 | 2 |
+| Firewall / SSH (22) | `BRUTE_FORCE_SSH` | T1110.001 | 5 |
+| Firewall / RDP (3389) | `BRUTE_FORCE_RDP` | T1110 | 5 |
+
+### Triggers do template
+
+| Trigger | Criticidade | Condição |
+|---|---|---|
+| Volume crítico de bloqueios firewall | HIGH | ≥ 1.000 bloqueios/min |
+| Pico de bloqueios firewall | WARNING | ≥ 100 bloqueios/min |
+| Volume crítico IPS | HIGH | ≥ 500 detecções/min |
+| Pico IPS | WARNING | ≥ 50 detecções/min |
+| Malware detectado | HIGH | ≥ 5 detecções em 10min |
+| **ATP / C2 detectado** | **DISASTER** | **Qualquer detecção** |
+| Ataque distribuído | HIGH | ≥ 30 IPs distintos |
+| Pipeline syslog parado | WARNING | Sem heartbeat por 30min |
+
+> **ATP = DISASTER:** qualquer detecção de comunicação C2/botnet é crítica
+> porque indica comprometimento ativo de um dispositivo na rede.
+
+### Configuração mínima no Sophos XG/XGS
+
+```
+System > Administration > Notification Settings
+> Log Settings > Syslog Server > Add
+  Name:     DDoS Guard
+  IP:       IP_DO_APPLIANCE_ZABBIX
+  Port:     514
+  Facility: LOCAL0
+  Format:   Device Standard Format (SFOS)
+  Severity: Information
+> Log Types: ✅ Firewall ✅ IPS ✅ Anti-Virus ✅ ATP ✅ Web Filter
+```
+
+Via CLI (SFOS):
+```
+system syslog add name "DDoSGuard" ipaddress IP_ZABBIX port 514
+system syslog update name "DDoSGuard" logcomponent all
+system syslog enable
+```
+
+### Sophos Central / Intercept X
+
+O Sophos Central não envia syslog nativo. Três opções:
+
+1. **Sophos Syslog Forwarder** — instale no servidor Windows gerenciado
+   pelo Central. Encaminha eventos para o appliance Zabbix.
+
+2. **API + syslog_forwarder.py** — use a API REST do Sophos Central
+   para buscar eventos e encaminhar via syslog local.
+
+3. **XG como proxy** — configure o Sophos XG para receber eventos
+   do Central e reencaminhar via syslog para o Zabbix.
