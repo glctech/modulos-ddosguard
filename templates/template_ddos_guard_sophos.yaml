@@ -3,7 +3,7 @@ zabbix_export:
   template_groups:
     - uuid: 36bff6c29af64692839d077febfc7079
       name: 'Templates/Network devices'
-    - uuid: 2e5f1dfa8c4f4762a99fa47b4b8249bc
+    - uuid: 2f5d15779fbb45a0ac111a2b03675246
       name: 'Templates/Security'
   templates:
 
@@ -32,7 +32,7 @@ zabbix_export:
     #
     # Compatível com: Zabbix 7.4+ | SFOS 18.0+ / 19.0+ / 20.0+
     # ==================================================================
-    - uuid: a3f9c2e14d7b4a8e9c6f1d3b5e8a2c4f
+    - uuid: 93a10476aa9242538f8d57030565bafb
       template: 'DDoS Guard - Sophos Security'
       name: 'DDoS Guard - Sophos Security'
       description: |
@@ -102,7 +102,7 @@ zabbix_export:
       items:
 
         # ── Firewall ─────────────────────────────────────────────────
-        - uuid: b1e4f7a2c9d3e6f8a5b2c4d7e9f1a3b5
+        - uuid: cb4c4a761a1d421aacf7f04bac0e23b7
           name: 'DDoS Guard: Sophos firewall blocks per minute'
           type: TRAP
           key: 'ddosguard.firewall.rate'
@@ -119,7 +119,7 @@ zabbix_export:
             - tag: source
               value: sophos
           triggers:
-            - uuid: c2f5g8b3d6e9a2b5c8d1e4f7a0b3c6d9
+            - uuid: a21f4e3fe6c04bcb90734e6630858f5b
               expression: 'min(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.HIGH}'
               name: 'Sophos: Volume crítico de bloqueios em {HOST.NAME} (>={$SOPHOS.FW.BLOCK.HIGH}/min)'
               priority: HIGH
@@ -131,7 +131,7 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: security
-            - uuid: d3g6h9c4e7f0b3c6d9e2f5g8b1c4d7e0
+            - uuid: 3b1f14c1a4d84172a5b667465ebb24f9
               expression: 'min(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.WARN}'
               name: 'Sophos: Alto volume de bloqueios em {HOST.NAME} (>={$SOPHOS.FW.BLOCK.WARN}/min)'
               priority: WARNING
@@ -143,7 +143,7 @@ zabbix_export:
                 - tag: scope
                   value: security
 
-        - uuid: e4h7i0d5f8g1c4d7e0f3g6h9c2d5e8f1
+        - uuid: 5045494b3d2b41758d1b785a1c3e1e2e
           name: 'DDoS Guard: Sophos block event (JSON)'
           type: TRAP
           key: 'ddosguard.block.firewall'
@@ -160,7 +160,7 @@ zabbix_export:
               value: sophos
 
         # ── IPS ──────────────────────────────────────────────────────
-        - uuid: f5i8j1e6g9h2d5e8f1g4h7i0d3e6f9g2
+        - uuid: 28ba07ee9e434a1dab7c32aa78fe37fa
           name: 'DDoS Guard: Sophos IPS detections per minute'
           type: TRAP
           key: 'ddosguard.attacks.rate'
@@ -177,7 +177,7 @@ zabbix_export:
             - tag: source
               value: sophos
           triggers:
-            - uuid: g6j9k2f7h0i3e6f9g2h5i8j1e4f7g0h3
+            - uuid: 9882569cb7a245aa8eb65cfc087afb94
               expression: 'min(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.HIGH}'
               name: 'Sophos: Volume crítico de detecções IPS em {HOST.NAME}'
               priority: HIGH
@@ -188,7 +188,7 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: security
-            - uuid: h7k0l3g8i1j4f7g0h3i6j9k2f5g8h1i4
+            - uuid: a58b1281842d49c091e7e2c77830b4a6
               expression: 'min(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.WARN}'
               name: 'Sophos: Pico de detecções IPS em {HOST.NAME}'
               priority: WARNING
@@ -200,7 +200,7 @@ zabbix_export:
                 - tag: scope
                   value: security
 
-        - uuid: i8l1m4h9j2k5g8h1i4j7k0l3g6h9i2j5
+        - uuid: 2c46fc7ed26449788dc4f7d82442bfc9
           name: 'DDoS Guard: Sophos attack event (JSON)'
           type: TRAP
           key: 'ddosguard.attack.event'
@@ -217,7 +217,7 @@ zabbix_export:
               value: sophos
 
         # ── Antivírus ─────────────────────────────────────────────────
-        - uuid: j9m2n5i0k3l6h9i2j5k8l1m4h7i0j3k6
+        - uuid: fb4ac9e6fb5c446aaed9beb0b8f3fd43
           name: 'DDoS Guard: Sophos AV blocks per minute'
           type: TRAP
           key: 'ddosguard.antivirus.rate'
@@ -234,7 +234,7 @@ zabbix_export:
             - tag: source
               value: sophos
           triggers:
-            - uuid: k0n3o6j1l4m7i0j3k6l9m2n5i8j1k4l7
+            - uuid: 34b0d9f774ba44a8862eda0a2e3dec90
               expression: 'sum(/DDoS Guard - Sophos Security/ddosguard.antivirus.rate,10m)>={$SOPHOS.AV.WARN}'
               name: 'Sophos: Malware detectado em {HOST.NAME} ({$SOPHOS.AV.WARN}+ detecções em 10min)'
               priority: HIGH
@@ -247,7 +247,7 @@ zabbix_export:
                 - tag: scope
                   value: security
 
-        - uuid: l1o4p7k2m5n8j1k4l7m0n3o6j9k2l5m8
+        - uuid: e1e092de03714cd185c4224c238914c6
           name: 'DDoS Guard: Sophos AV block event (JSON)'
           type: TRAP
           key: 'ddosguard.block.antivirus'
@@ -264,7 +264,7 @@ zabbix_export:
               value: sophos
 
         # ── ATP — Advanced Threat Protection ─────────────────────────
-        - uuid: m2p5q8l3n6o9k2l5m8n1o4p7k0l3m6n9
+        - uuid: d09b8e530051476aaad328b4480acff3
           name: 'DDoS Guard: Sophos ATP event (JSON)'
           type: TRAP
           key: 'ddosguard.sophos.atp'
@@ -281,7 +281,7 @@ zabbix_export:
             - tag: source
               value: sophos
           triggers:
-            - uuid: n3q6r9m4o7p0l3m6n9o2p5q8l1m4n7o0
+            - uuid: 2777c95493e440fb801077894c3451e2
               expression: 'nodata(/DDoS Guard - Sophos Security/ddosguard.sophos.atp,1m)=0'
               name: 'Sophos ATP: Comunicação C2/botnet detectada em {HOST.NAME}'
               priority: DISASTER
@@ -303,7 +303,7 @@ zabbix_export:
                   value: security
 
         # ── Heartbeat ─────────────────────────────────────────────────
-        - uuid: o4r7s0n5p8q1m4n7o0p3q6r9m2n5o8p1
+        - uuid: 38578851b84a4490a86c64531640bcd6
           name: 'DDoS Guard: Sophos syslog heartbeat'
           type: TRAP
           key: 'ddosguard.agent.heartbeat'
@@ -319,7 +319,7 @@ zabbix_export:
             - tag: source
               value: sophos
           triggers:
-            - uuid: p5s8t1o6q9r2n5o8p1q4r7s0n3o6p9q2
+            - uuid: b62835f45ed04a9f920fa2bb623e3dbf
               expression: 'nodata(/DDoS Guard - Sophos Security/ddosguard.agent.heartbeat,{$SOPHOS.HEARTBEAT.TIMEOUT})=1'
               name: 'Sophos: Pipeline syslog parou em {HOST.NAME}'
               priority: WARNING
@@ -337,7 +337,7 @@ zabbix_export:
                   value: availability
 
         # ── IPs distintos ─────────────────────────────────────────────
-        - uuid: q6t9u2p7r0s3o6p9q2r5s8t1o4p7q0r3
+        - uuid: 22157941d2804b789a0a0f945ff8d8ec
           name: 'DDoS Guard: distinct source IPs (last 5 min)'
           type: TRAP
           key: 'ddosguard.distinct_ips.rate'
@@ -352,7 +352,7 @@ zabbix_export:
             - tag: source
               value: sophos
           triggers:
-            - uuid: r7u0v3q8s1t4p7q0r3s6t9u2p5q8r1s4
+            - uuid: 26cd1381c8b1413bbf2f2ca20cdaf125
               expression: 'min(/DDoS Guard - Sophos Security/ddosguard.distinct_ips.rate,5m)>=30'
               name: 'Sophos: Ataque distribuído detectado em {HOST.NAME} (>=30 IPs distintos)'
               priority: HIGH

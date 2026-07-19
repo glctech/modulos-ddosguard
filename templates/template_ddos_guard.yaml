@@ -1,10 +1,10 @@
 zabbix_export:
   version: '7.4'
   template_groups:
-    - uuid: 2e5f1dfa8c4f4762a99fa47b4b8249bc
+    - uuid: 7df96b18c230490a9a0a9c7bf20dbb25
       name: 'Templates/Security'
   templates:
-    - uuid: a9fdb52f3b7e4ad982d5660e9d0f0b95
+    - uuid: 05ca82b2df794cafab83905d6ab7358c
       template: 'DDoS Guard - Security Monitoring'
       name: 'DDoS Guard - Security Monitoring'
       description: |
@@ -18,7 +18,7 @@ zabbix_export:
       groups:
         - name: 'Templates/Security'
       items:
-        - uuid: d0f8b0a7dbfc4701aeff260efa176958
+        - uuid: 367f5214779e4d0d830310241345960e
           name: 'DDoS Guard: raw attack event (JSON)'
           type: TRAP
           key: 'ddosguard.attack.event'
@@ -45,7 +45,7 @@ zabbix_export:
           tags:
             - tag: component
               value: ddos
-        - uuid: bdea0a75c6e84effa3c88d293938c882
+        - uuid: 7dbc4109868b4940897533c4acf90210
           name: 'DDoS Guard: raw block event - firewall (JSON)'
           type: TRAP
           key: 'ddosguard.block.firewall'
@@ -57,7 +57,7 @@ zabbix_export:
           tags:
             - tag: component
               value: firewall
-        - uuid: d2e1dbd7c50f4188b35f7b7ac4d146a7
+        - uuid: 19b496ce58ae498786e505367ce99389
           name: 'DDoS Guard: raw block event - antivirus (JSON)'
           type: TRAP
           key: 'ddosguard.block.antivirus'
@@ -69,7 +69,7 @@ zabbix_export:
           tags:
             - tag: component
               value: antivirus
-        - uuid: f55868497d614682800c86426dac987d
+        - uuid: 4ba46de32f5c4fc580ad1be9aa939590
           name: 'DDoS Guard: attacks per minute (counter)'
           type: TRAP
           key: 'ddosguard.attacks.rate'
@@ -79,7 +79,7 @@ zabbix_export:
             - tag: component
               value: ddos
           triggers:
-            - uuid: a141eeebd12743cda8937ed028dec419
+            - uuid: f6da58e4bc8c4d918a32231cfe1e8338
               expression: 'min(/DDoS Guard - Security Monitoring/ddosguard.attacks.rate,5m)>=200'
               name: 'Possível ataque DDoS em andamento em {HOST.NAME} (>=200 tentativas/min por 5min)'
               priority: DISASTER
@@ -89,7 +89,7 @@ zabbix_export:
                   value: availability
                 - tag: component
                   value: ddos
-            - uuid: 3d2288db87fd4a14929667ac88183873
+            - uuid: 97b1bbba3c794802aaa2e3fcf0c7bc64
               expression: 'min(/DDoS Guard - Security Monitoring/ddosguard.attacks.rate,2m)>=50'
               name: 'Pico de tentativas de ataque em {HOST.NAME} (>=50 tentativas/min)'
               priority: HIGH
@@ -99,7 +99,7 @@ zabbix_export:
                   value: availability
                 - tag: component
                   value: ddos
-        - uuid: 20680a8a0f664f3cb4084a69c2a8ef90
+        - uuid: b42a5c2803484bf1917aad5246fab6b2
           name: 'DDoS Guard: firewall blocks per minute (counter)'
           type: TRAP
           key: 'ddosguard.firewall.rate'
@@ -108,7 +108,7 @@ zabbix_export:
           tags:
             - tag: component
               value: firewall
-        - uuid: 1377b555efac4807aaab409471fbe45b
+        - uuid: f8c212d749054db5afbcd36b8f206d6b
           name: 'DDoS Guard: antivirus blocks per minute (counter)'
           type: TRAP
           key: 'ddosguard.antivirus.rate'
@@ -118,7 +118,7 @@ zabbix_export:
             - tag: component
               value: antivirus
           triggers:
-            - uuid: 335dc2f8827945539f3418739baaf74b
+            - uuid: c6f9977e88f8416385fd9dd780011c30
               expression: 'min(/DDoS Guard - Security Monitoring/ddosguard.antivirus.rate,10m)>=10'
               name: 'Múltiplas detecções de malware em {HOST.NAME}'
               priority: HIGH
@@ -128,7 +128,7 @@ zabbix_export:
                   value: security
                 - tag: component
                   value: antivirus
-        - uuid: ecaf51a42a744c519f32d93dd3f2bae2
+        - uuid: 9deb156342234fc99a85ae6faec5f581
           name: 'DDoS Guard: distinct source IPs (last 5 min)'
           type: TRAP
           key: 'ddosguard.distinct_ips.rate'
@@ -138,7 +138,7 @@ zabbix_export:
             - tag: component
               value: ddos
           triggers:
-            - uuid: 271daa6479ca4795ad180a96e55e024f
+            - uuid: 305303fcf69b4f21ac54671701ed8fa7
               expression: 'min(/DDoS Guard - Security Monitoring/ddosguard.distinct_ips.rate,5m)>=100'
               name: 'Ataque distribuído (DDoS) detectado em {HOST.NAME} - muitas origens distintas'
               priority: DISASTER
@@ -148,7 +148,7 @@ zabbix_export:
                   value: availability
                 - tag: component
                   value: ddos
-        - uuid: 01c7dc5112eb4f52a85d96bf4674296b
+        - uuid: 7813430507a34bb1ac9bb66fc98fd93c
           name: 'DDoS Guard: agent heartbeat'
           type: TRAP
           key: 'ddosguard.agent.heartbeat'
@@ -158,7 +158,7 @@ zabbix_export:
             - tag: component
               value: monitoring
           triggers:
-            - uuid: 002b9d10d2cb4033a5d15eb655258250
+            - uuid: 1bf919247bfc482791676538d82a6770
               expression: 'nodata(/DDoS Guard - Security Monitoring/ddosguard.agent.heartbeat,15m)=1'
               name: 'Agente DDoS Guard parou de enviar dados em {HOST.NAME}'
               priority: WARNING
@@ -169,7 +169,7 @@ zabbix_export:
                 - tag: component
                   value: monitoring
       dashboards:
-        - uuid: e7e120fbdf084302bc107c0b11cef696
+        - uuid: 6fee1cd0a9554cccb10f8c4473a9086a
           name: 'DDoS Guard - Security Operations Center'
           display_period: '30'
           auto_start: 'YES'
@@ -243,7 +243,7 @@ zabbix_export:
                       name: show_lines
                       value: '10'
       valuemaps:
-        - uuid: 1fd939343f93499ab8cab1b371bf2ca2
+        - uuid: 3848022b4806414d8730b2e2ca2ebe5c
           name: 'DDoS Guard severity'
           mappings:
             - value: '0'

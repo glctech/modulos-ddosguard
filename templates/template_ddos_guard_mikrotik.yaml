@@ -3,7 +3,7 @@ zabbix_export:
   template_groups:
     - uuid: 36bff6c29af64692839d077febfc7079
       name: 'Templates/Network devices'
-    - uuid: 2e5f1dfa8c4f4762a99fa47b4b8249bc
+    - uuid: 7df96b18c230490a9a0a9c7bf20dbb25
       name: 'Templates/Security'
   templates:
 
@@ -32,7 +32,7 @@ zabbix_export:
     # Compativel com: Zabbix 7.4+ | RouterOS 6.x / 7.x
     # Modelos suportados: CCR, CRS, hEX, RB, CSS, CAPsMAN
     # ==================================================================
-    - uuid: f9eef0040b774554a30f003c583696dd
+    - uuid: e45ef4139952472b92282fb12220cc89
       template: 'DDoS Guard - MikroTik Security'
       name: 'DDoS Guard - MikroTik Security'
       description: |
@@ -123,7 +123,7 @@ zabbix_export:
         # ----------------------------------------------------------------
 
         # CPU — DDoS consome CPU do firewall/NAT
-        - uuid: 195ec2e6e5724d308726e27650311b44
+        - uuid: 016fb93e38b44ae19f44b4c0c6db7d10
           name: 'DDoS Guard: CPU utilization alert'
           type: CALCULATED
           key: 'ddosguard.mtk.cpu.util'
@@ -142,7 +142,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: 2360d411dc5d485ea2d816f3ae673863
+            - uuid: 3fdeb685a55644c39e39725b8e02686b
               expression: 'avg(/DDoS Guard - MikroTik Security/ddosguard.mtk.cpu.util,5m)>={$MTK.CPU.HIGH}'
               name: 'MikroTik: CPU critica em {HOST.NAME} (>={$MTK.CPU.HIGH}%)'
               priority: HIGH
@@ -157,7 +157,7 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: availability
-            - uuid: e1e32e067c9743b8ab0a870392bb2914
+            - uuid: e8a7f5055bd544c7896f04e05ba03a24
               expression: 'avg(/DDoS Guard - MikroTik Security/ddosguard.mtk.cpu.util,5m)>={$MTK.CPU.WARN}'
               name: 'MikroTik: CPU elevada em {HOST.NAME} (>={$MTK.CPU.WARN}%)'
               priority: WARNING
@@ -170,7 +170,7 @@ zabbix_export:
                   value: availability
 
         # Memoria — connection tracking esgota memoria rapidamente em DDoS
-        - uuid: 10ae3d4b7887475b872369f9bffc545e
+        - uuid: 9407630d6edc4a2c9edbc4e815c5d765
           name: 'DDoS Guard: Memory utilization alert'
           type: CALCULATED
           key: 'ddosguard.mtk.mem.util'
@@ -189,7 +189,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: 523d6bf07681472babb08f9b636cf557
+            - uuid: c6f04dde5b4646b68839c1318a9e4fe2
               expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.mem.util)>={$MTK.MEM.WARN}'
               name: 'MikroTik: Memoria critica em {HOST.NAME} (>={$MTK.MEM.WARN}%)'
               priority: HIGH
@@ -207,7 +207,7 @@ zabbix_export:
                   value: availability
 
         # Bandwidth — detecta flood por saturacao de interface
-        - uuid: d425ed03965548f4b5c194cfe742b417
+        - uuid: 0e0f4d6aca3f4033bd5b41b456bec0bc
           name: 'DDoS Guard: Interface bandwidth flood detection'
           type: CALCULATED
           key: 'ddosguard.mtk.bw.flood'
@@ -227,7 +227,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: a46cb509e3a748c0ad5a4044df5a7f2a
+            - uuid: caf2d577a59b4f3fa478346ebc27b496
               expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.bw.flood)>={$MTK.BW.FLOOD.WARN}'
               name: 'MikroTik: Possivel flood de bandwidth em {HOST.NAME}'
               priority: HIGH
@@ -247,7 +247,7 @@ zabbix_export:
         # Itens TRAPPER — recebem eventos do syslog_receiver.php
         # ----------------------------------------------------------------
 
-        - uuid: c8a14a5ef45f447e83d63264f8bc76ac
+        - uuid: 2e2af995cf1d443881ebb360252ac9fa
           name: 'DDoS Guard: MikroTik firewall blocks per minute'
           type: TRAP
           key: 'ddosguard.firewall.rate'
@@ -263,7 +263,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: 9ba7d2732a854c7ea8d4843933dc799c
+            - uuid: 01df2d8914a14324bbe3410544a620c2
               expression: 'min(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.HIGH}'
               name: 'MikroTik: Volume critico de bloqueios em {HOST.NAME} (>={$MTK.FIREWALL.BLOCK.HIGH}/min)'
               priority: HIGH
@@ -277,7 +277,7 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: security
-            - uuid: 97b9b80e230e43cf9ecbd5f9fb6d4812
+            - uuid: bbe741bd9784447e87cf2c84f4dc4b2b
               expression: 'min(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.WARN}'
               name: 'MikroTik: Alto volume de bloqueios em {HOST.NAME} (>={$MTK.FIREWALL.BLOCK.WARN}/min)'
               priority: WARNING
@@ -289,7 +289,7 @@ zabbix_export:
                 - tag: scope
                   value: security
 
-        - uuid: 608a5fe2252044c8b2fdae439a6c1e54
+        - uuid: 11fd9277d95946e29bf9d7e8b5eb494f
           name: 'DDoS Guard: MikroTik attack event (JSON)'
           type: TRAP
           key: 'ddosguard.attack.event'
@@ -305,7 +305,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
 
-        - uuid: db07b8fe8f234b97a828d5c6d909e928
+        - uuid: 319cd1e1133240299378f3d622ce4270
           name: 'DDoS Guard: MikroTik block event (JSON)'
           type: TRAP
           key: 'ddosguard.block.firewall'
@@ -321,7 +321,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
 
-        - uuid: 17af9faf2eac4480b637af86684fb20e
+        - uuid: 446212b0f92d43dbb3dbc5ea6aab2cb9
           name: 'DDoS Guard: MikroTik brute-force events'
           type: TRAP
           key: 'ddosguard.mtk.bruteforce'
@@ -341,7 +341,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: 0a5731aeec1943358daea6eb9168c461
+            - uuid: 75206f6324414760a672ec1870fa84bf
               expression: 'sum(/DDoS Guard - MikroTik Security/ddosguard.mtk.bruteforce,5m)>={$MTK.BRUTE.WARN}'
               name: 'MikroTik: Brute-force SSH/Winbox detectado em {HOST.NAME}'
               priority: HIGH
@@ -358,7 +358,7 @@ zabbix_export:
                   value: security
 
         # Port scan detection
-        - uuid: 77348a8a19b246b89416e24b91c16ebd
+        - uuid: 2af2cc44c36e49f9a91f72cdb05e9a9a
           name: 'DDoS Guard: MikroTik port scan events'
           type: TRAP
           key: 'ddosguard.mtk.portscan'
@@ -374,7 +374,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: 938a3751d30d4954a3b9fa3ff7cd4517
+            - uuid: 7b571c52a5c3498d96a78f6b8173c3c8
               expression: 'sum(/DDoS Guard - MikroTik Security/ddosguard.mtk.portscan,5m)>=10'
               name: 'MikroTik: Port scan detectado em {HOST.NAME}'
               priority: WARNING
@@ -388,7 +388,7 @@ zabbix_export:
                   value: security
 
         # Connection tracking — esgotamento em DDoS
-        - uuid: f5164c6e2593455b9298e7c69a0cba62
+        - uuid: 8fb27e306bfd431688b84cd0f3a68887
           name: 'DDoS Guard: MikroTik connection table usage'
           type: TRAP
           key: 'ddosguard.mtk.connections'
@@ -405,7 +405,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: cd586f87216140008c59064ae6a98589
+            - uuid: 580e1caba0fb41cb800dd8d59f36629d
               expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.connections)>={$MTK.CONN.HIGH}'
               name: 'MikroTik: Connection tracking saturado em {HOST.NAME} (>={$MTK.CONN.HIGH})'
               priority: DISASTER
@@ -423,7 +423,7 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: availability
-            - uuid: fa0e20559243416ab555ffd6ed9102bc
+            - uuid: b709a19570cb4a288ccf962449c28a7c
               expression: 'last(/DDoS Guard - MikroTik Security/ddosguard.mtk.connections)>={$MTK.CONN.WARN}'
               name: 'MikroTik: Alto numero de conexoes em {HOST.NAME} (>={$MTK.CONN.WARN})'
               priority: WARNING
@@ -436,7 +436,7 @@ zabbix_export:
                   value: availability
 
         # Heartbeat do pipeline syslog
-        - uuid: 8f2de1379802494a9bdf0bcba4baace4
+        - uuid: efdc0e9866874b8a892478f54cdd76f8
           name: 'DDoS Guard: MikroTik syslog heartbeat'
           type: TRAP
           key: 'ddosguard.agent.heartbeat'
@@ -451,7 +451,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: 59054259fe7b422b8168ca25d55479ee
+            - uuid: b33410affcd343a5a77cddb2713c7ce2
               expression: 'nodata(/DDoS Guard - MikroTik Security/ddosguard.agent.heartbeat,{$MTK.HEARTBEAT.TIMEOUT})=1'
               name: 'MikroTik: Pipeline syslog parou em {HOST.NAME}'
               priority: WARNING
@@ -467,7 +467,7 @@ zabbix_export:
                   value: availability
 
         # IPs distintos — detecta DDoS distribuido
-        - uuid: 41af5951d9e14f6a889fe1459ca4fa2e
+        - uuid: ecb625d856264bde8da504a672c9405d
           name: 'DDoS Guard: distinct source IPs (last 5 min)'
           type: TRAP
           key: 'ddosguard.distinct_ips.rate'
@@ -482,7 +482,7 @@ zabbix_export:
             - tag: source
               value: mikrotik
           triggers:
-            - uuid: 6f4ce4469275424e92e1144dfa5822f8
+            - uuid: b368f649fcfd43cdbaa4321605743d8e
               expression: 'min(/DDoS Guard - MikroTik Security/ddosguard.distinct_ips.rate,5m)>=50'
               name: 'MikroTik: Ataque distribuido detectado em {HOST.NAME} (>=50 IPs distintos)'
               priority: DISASTER

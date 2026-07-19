@@ -3,7 +3,7 @@ zabbix_export:
   template_groups:
     - uuid: 36bff6c29af64692839d077febfc7079
       name: 'Templates/Network devices'
-    - uuid: 2e5f1dfa8c4f4762a99fa47b4b8249bc
+    - uuid: 7df96b18c230490a9a0a9c7bf20dbb25
       name: 'Templates/Security'
   templates:
 
@@ -27,7 +27,7 @@ zabbix_export:
     #        set format default
     #      end
     # ==================================================================
-    - uuid: 85f7ac9fe6164b6289f6cc4838157432
+    - uuid: 8350c20818f74b758110b475f581a372
       template: 'DDoS Guard - FortiGate Security'
       name: 'DDoS Guard - FortiGate Security'
       description: |
@@ -107,7 +107,7 @@ zabbix_export:
         # ----------------------------------------------------------------
         # Itens trapper — recebem eventos via syslog_receiver.php
         # ----------------------------------------------------------------
-        - uuid: 734ed2ff69a849a69bcda9499041374e
+        - uuid: 50c2465f5fab4f92a7fd4726d31b4841
           name: 'DDoS Guard: FortiGate firewall blocks per minute'
           type: TRAP
           key: 'ddosguard.firewall.rate'
@@ -125,7 +125,7 @@ zabbix_export:
             - tag: source
               value: ddosguard-agent
           triggers:
-            - uuid: 61cfefa0ea2e4f2a8cf4c48499f69050
+            - uuid: b8c4b43cabea4bd09c26506b9263237d
               expression: 'min(/DDoS Guard - FortiGate Security/ddosguard.firewall.rate,10m)>={$FG.IPS.BLOCK.HIGH}'
               name: 'FortiGate: Volume critico de bloqueios em {HOST.NAME} (>={$FG.IPS.BLOCK.HIGH}/min)'
               priority: HIGH
@@ -138,7 +138,7 @@ zabbix_export:
                 - tag: scope
                   value: security
 
-        - uuid: 1586e7441f334d448b82c07b3c509ba0
+        - uuid: a6f0bd22b4b1471fabf1e235e7daec09
           name: 'DDoS Guard: FortiGate attack event (JSON)'
           type: TRAP
           key: 'ddosguard.attack.event'
@@ -153,7 +153,7 @@ zabbix_export:
             - tag: source
               value: fortigate
 
-        - uuid: 17b78251dcdc41679ee51faaf3c689b3
+        - uuid: 358b57cbe8fe478abda9f8c76c392bf4
           name: 'DDoS Guard: FortiGate block event (JSON)'
           type: TRAP
           key: 'ddosguard.block.firewall'
@@ -168,7 +168,7 @@ zabbix_export:
             - tag: source
               value: fortigate
 
-        - uuid: 63ec119d37394095aff8112c65383d72
+        - uuid: 7d73e3790fd54185930e557f085657a3
           name: 'DDoS Guard: FortiGate AV block event (JSON)'
           type: TRAP
           key: 'ddosguard.block.antivirus'
@@ -189,7 +189,7 @@ zabbix_export:
         # ----------------------------------------------------------------
 
         # IPS — Bloqueios
-        - uuid: ecd7c70343ae4fa886f74b6a6101f86a
+        - uuid: b7a9157a0d604537ae11f61c47da0367
           name: 'DDoS Guard: IPS blocked intrusions rate'
           type: CALCULATED
           key: 'ddosguard.fg.ips.blocks.rate'
@@ -208,7 +208,7 @@ zabbix_export:
             - tag: source
               value: fortigate
           triggers:
-            - uuid: e9775623c6e84468b67b4aba694e4327
+            - uuid: 203d87058ba749a69d402fc9229dc805
               expression: 'avg(/DDoS Guard - FortiGate Security/ddosguard.fg.ips.blocks.rate,5m)>={$FG.IPS.BLOCK.WARN}'
               name: 'FortiGate: Pico de bloqueios IPS em {HOST.NAME} (>={$FG.IPS.BLOCK.WARN}/min)'
               priority: WARNING
@@ -219,7 +219,7 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: security
-            - uuid: d8e03d427c3a4ff5b594926fcf6c79f1
+            - uuid: 5d42f59fdcb74f23917a22deb9ded2a3
               expression: 'avg(/DDoS Guard - FortiGate Security/ddosguard.fg.ips.blocks.rate,5m)>={$FG.IPS.BLOCK.HIGH}'
               name: 'FortiGate: Ataque detectado pelo IPS em {HOST.NAME} (>={$FG.IPS.BLOCK.HIGH}/min)'
               priority: HIGH
@@ -238,7 +238,7 @@ zabbix_export:
                   value: security
 
         # Sessoes ativas — indicador de saturacao/DDoS
-        - uuid: 4c8720498b2547e38af4c7c8e27cacf3
+        - uuid: 811e7371b0fd4f31b65469cca48a08bf
           name: 'DDoS Guard: Active sessions alert'
           type: CALCULATED
           key: 'ddosguard.fg.sessions.alert'
@@ -256,7 +256,7 @@ zabbix_export:
             - tag: source
               value: fortigate
           triggers:
-            - uuid: a5d26fa7a9bc49c8b185e36fe45b550a
+            - uuid: 3dcfdd5d6b764223895f0a991df2b42b
               expression: 'last(/DDoS Guard - FortiGate Security/ddosguard.fg.sessions.alert)>={$FG.SESSION.HIGH}'
               name: 'FortiGate: Saturacao de sessoes em {HOST.NAME} (>={$FG.SESSION.HIGH})'
               priority: HIGH
@@ -268,7 +268,7 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: availability
-            - uuid: 4608c2a8559d4f2385347296d594f006
+            - uuid: 975fbc69be7e41ef818b7500cf252d2e
               expression: 'last(/DDoS Guard - FortiGate Security/ddosguard.fg.sessions.alert)>={$FG.SESSION.WARN}'
               name: 'FortiGate: Alto numero de sessoes em {HOST.NAME} (>={$FG.SESSION.WARN})'
               priority: WARNING
@@ -281,7 +281,7 @@ zabbix_export:
                   value: availability
 
         # VPN — Monitoramento de tuneis caidos
-        - uuid: fa625b143d6a45da97a050c95f8fb069
+        - uuid: 264970d81177442f9ce18bf0d7b72805
           name: 'DDoS Guard: VPN tunnels down'
           type: CALCULATED
           key: 'ddosguard.fg.vpn.down'
@@ -299,7 +299,7 @@ zabbix_export:
             - tag: source
               value: fortigate
           triggers:
-            - uuid: f75ee72286094c4aa1b6103b9a678218
+            - uuid: 3ff107264a7f4d4faa2d80aace32f0d3
               expression: |
                 change(/DDoS Guard - FortiGate Security/ddosguard.fg.vpn.down)<-2
                 and last(/DDoS Guard - FortiGate Security/ddosguard.fg.vpn.down)>=0
@@ -314,7 +314,7 @@ zabbix_export:
                   value: availability
 
         # Heartbeat DDoS Guard
-        - uuid: 9e02555c37d34db4b6f1d1556f1d796f
+        - uuid: c08ccb5731ee4245a96125253c12ef4f
           name: 'DDoS Guard: agent heartbeat'
           type: TRAP
           key: 'ddosguard.agent.heartbeat'
@@ -329,7 +329,7 @@ zabbix_export:
             - tag: source
               value: fortigate
           triggers:
-            - uuid: 747dcf7146b64276ab9e5455d8a21670
+            - uuid: 96cd6ecae89240da87990689e81f491f
               expression: 'nodata(/DDoS Guard - FortiGate Security/ddosguard.agent.heartbeat,30m)=1'
               name: 'FortiGate: Pipeline DDoS Guard parou em {HOST.NAME}'
               priority: WARNING
@@ -351,7 +351,7 @@ zabbix_export:
     # Detecta: port security violations, MAC spoofing, loops,
     # autenticacao 802.1X falhada, DHCP snooping violations.
     # ==================================================================
-    - uuid: 0274198117404db09f401ccdb1a74468
+    - uuid: 11dfffebd54847fe808c5f5c12fd8fce
       template: 'DDoS Guard - FortiSwitch Security'
       name: 'DDoS Guard - FortiSwitch Security'
       description: |
@@ -397,7 +397,7 @@ zabbix_export:
         # ----------------------------------------------------------------
         # Itens trapper via syslog
         # ----------------------------------------------------------------
-        - uuid: 9894ebf5356942389e85b93cb8611ff4
+        - uuid: 600001dc425245eb9fdd5f73f02613bf
           name: 'DDoS Guard: FortiSwitch security events'
           type: TRAP
           key: 'ddosguard.attack.event'
@@ -413,7 +413,7 @@ zabbix_export:
             - tag: source
               value: fortiswitch
 
-        - uuid: 40c3bd8197074b4fa4252fe5190d9190
+        - uuid: 548153c407f94f83800e92727e6a4c82
           name: 'DDoS Guard: FortiSwitch blocks per minute'
           type: TRAP
           key: 'ddosguard.firewall.rate'
@@ -427,7 +427,7 @@ zabbix_export:
             - tag: source
               value: fortiswitch
           triggers:
-            - uuid: d47a68ebac074715a55d44b06c40b0a5
+            - uuid: 5982ca69d0334524924128dca6c8fc85
               expression: 'min(/DDoS Guard - FortiSwitch Security/ddosguard.firewall.rate,5m)>={$FSW.PORT.VIOLATIONS.WARN}'
               name: 'FortiSwitch: Alto volume de violacoes de seguranca em {HOST.NAME}'
               priority: HIGH
@@ -441,7 +441,7 @@ zabbix_export:
                   value: security
 
         # Port Security Violations
-        - uuid: 6d4d8c7c67b648f79ed20fc46a60d1e3
+        - uuid: 0b7fd5ca83bb447b9ceaa03340a35f60
           name: 'DDoS Guard: FortiSwitch port security violations'
           type: TRAP
           key: 'ddosguard.fsw.port.violations'
@@ -456,7 +456,7 @@ zabbix_export:
             - tag: source
               value: fortiswitch
           triggers:
-            - uuid: 3053ed1927cc4d0483312ad6ea6405fa
+            - uuid: cbdfecbc02444d6f808ab3de4cb41915
               expression: 'sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.port.violations,5m)>={$FSW.PORT.VIOLATIONS.WARN}'
               name: 'FortiSwitch: Violacoes de port security em {HOST.NAME}'
               priority: HIGH
@@ -470,7 +470,7 @@ zabbix_export:
                   value: security
 
         # MAC Spoofing
-        - uuid: 1bbd31ca46e64b80b41e716ee775ef83
+        - uuid: 072c373447334eff90f0ab3df9fdaf77
           name: 'DDoS Guard: FortiSwitch MAC spoofing events'
           type: TRAP
           key: 'ddosguard.fsw.mac.spoof'
@@ -485,7 +485,7 @@ zabbix_export:
             - tag: source
               value: fortiswitch
           triggers:
-            - uuid: a2b036013e0746368c161210e02338b5
+            - uuid: 3bdc6d8e276a489e98a25d02c75f81a8
               expression: 'sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.mac.spoof,5m)>={$FSW.MAC.SPOOF.WARN}'
               name: 'FortiSwitch: MAC Spoofing detectado em {HOST.NAME}'
               priority: HIGH
@@ -499,7 +499,7 @@ zabbix_export:
                   value: security
 
         # 802.1X Authentication Failures
-        - uuid: b9a73e3e182345039aa9885764fe2cb6
+        - uuid: 8165c2636d3b41d1b9d361255804ff69
           name: 'DDoS Guard: FortiSwitch 802.1X auth failures'
           type: TRAP
           key: 'ddosguard.fsw.dot1x.failures'
@@ -514,7 +514,7 @@ zabbix_export:
             - tag: source
               value: fortiswitch
           triggers:
-            - uuid: 431fffcefa324712af8ace12a8b0d460
+            - uuid: 4aa6aaee59c9486f975a526109340125
               expression: 'sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.dot1x.failures,5m)>={$FSW.DOT1X.FAIL.WARN}'
               name: 'FortiSwitch: Alto volume de falhas 802.1X em {HOST.NAME}'
               priority: WARNING
@@ -527,7 +527,7 @@ zabbix_export:
                   value: security
 
         # Loop Detection
-        - uuid: 4b6a526fac224d1182e0e9e63ccc0065
+        - uuid: 3dc1014df2b54a1dbbd2f4d13884c407
           name: 'DDoS Guard: FortiSwitch loop detected'
           type: TRAP
           key: 'ddosguard.fsw.loop.detected'
@@ -542,7 +542,7 @@ zabbix_export:
             - tag: source
               value: fortiswitch
           triggers:
-            - uuid: d5ee326980f94276a8a8a4d491221baf
+            - uuid: c2ec8293e93a47cf87003ddf812f9451
               expression: 'last(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.loop.detected)>0'
               name: 'FortiSwitch: Loop de rede detectado em {HOST.NAME}'
               priority: DISASTER
@@ -558,7 +558,7 @@ zabbix_export:
                   value: availability
 
         # Heartbeat
-        - uuid: 8bb8871ccb10468fb05abdb75ba434d7
+        - uuid: ed7eeb6ee29e474daa8d2d6ee31dea25
           name: 'DDoS Guard: FortiSwitch heartbeat'
           type: TRAP
           key: 'ddosguard.agent.heartbeat'
@@ -571,7 +571,7 @@ zabbix_export:
             - tag: source
               value: fortiswitch
           triggers:
-            - uuid: 7d518b45b20f4651b7e3c2aec570c485
+            - uuid: dd3faaa6334944eca81acfcfb0764f7a
               expression: 'nodata(/DDoS Guard - FortiSwitch Security/ddosguard.agent.heartbeat,30m)=1'
               name: 'FortiSwitch: Pipeline DDoS Guard parou em {HOST.NAME}'
               priority: WARNING

@@ -1,10 +1,10 @@
 zabbix_export:
   version: '7.4'
   template_groups:
-    - uuid: 2e5f1dfa8c4f4762a99fa47b4b8249bc
+    - uuid: 7df96b18c230490a9a0a9c7bf20dbb25
       name: 'Templates/Security'
   templates:
-    - uuid: f3bc4b45d2eb43348d738a8778f69567
+    - uuid: 6de95f8b5ce9434dbb9c63c1e792dfa5
       template: 'DDoS Guard - Agent'
       name: 'DDoS Guard - Agent'
       description: |
@@ -31,7 +31,7 @@ zabbix_export:
         # ------------------------------------------------------------------
         # Heartbeat — agente vivo
         # ------------------------------------------------------------------
-        - uuid: 9e19464ee7dd4885a3e934d67bfd0912
+        - uuid: 5db6fb0a3da8495fa187281fe5368a46
           name: 'DDoS Guard: agent heartbeat'
           type: TRAP
           key: 'ddosguard.agent.heartbeat'
@@ -46,7 +46,7 @@ zabbix_export:
             - tag: source
               value: ddosguard-agent
           triggers:
-            - uuid: c7cd68f0f1a94e49b0643300633840e1
+            - uuid: 276f4256538a4fc485a8099af938360e
               expression: 'nodata(/DDoS Guard - Agent/ddosguard.agent.heartbeat,15m)=1'
               name: 'DDoS Guard Agent parou em {HOST.NAME}'
               priority: WARNING
@@ -65,7 +65,7 @@ zabbix_export:
         # ------------------------------------------------------------------
         # Contadores de ataques
         # ------------------------------------------------------------------
-        - uuid: 1a20efbcfbc34ae6b15b84100926d730
+        - uuid: 43c3eee7c891458bbcb189725969b86e
           name: 'DDoS Guard: attacks per minute (counter)'
           type: TRAP
           key: 'ddosguard.attacks.rate'
@@ -80,7 +80,7 @@ zabbix_export:
             - tag: source
               value: ddosguard-agent
           triggers:
-            - uuid: 33f7123f2da34bdb84f655356aa943c3
+            - uuid: 059b6218084c4b6394a1afc9d2603f9d
               expression: 'min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>=50'
               name: 'Pico de ataques em {HOST.NAME} (>= 50/min)'
               priority: HIGH
@@ -94,7 +94,7 @@ zabbix_export:
                   value: availability
                 - tag: component
                   value: ddos
-            - uuid: e45280d202f64662830917deaa9e4c6b
+            - uuid: c04d91b02ce5460983bf49f2150faded
               expression: 'min(/DDoS Guard - Agent/ddosguard.attacks.rate,5m)>=200'
               name: 'Possível ataque DDoS em {HOST.NAME} (>= 200/min por 5min)'
               priority: DISASTER
@@ -115,7 +115,7 @@ zabbix_export:
         # ------------------------------------------------------------------
         # IPs distintos — detecta DDoS distribuído
         # ------------------------------------------------------------------
-        - uuid: 62de1367167d4a20908dfb9d093f1b02
+        - uuid: 1ceaf489b55744a3a9eef515a7a00023
           name: 'DDoS Guard: distinct source IPs (last 5 min)'
           type: TRAP
           key: 'ddosguard.distinct_ips.rate'
@@ -130,7 +130,7 @@ zabbix_export:
             - tag: source
               value: ddosguard-agent
           triggers:
-            - uuid: e3e71f2ef8e0472fa5a0ef3f9b22606a
+            - uuid: e464539ae6584c848f129a172928afe2
               expression: 'min(/DDoS Guard - Agent/ddosguard.distinct_ips.rate,5m)>=50'
               name: 'Ataque distribuído em {HOST.NAME} — muitas origens distintas (>= 50 IPs)'
               priority: DISASTER
@@ -148,7 +148,7 @@ zabbix_export:
         # ------------------------------------------------------------------
         # Bloqueios de firewall
         # ------------------------------------------------------------------
-        - uuid: d2d0140552db436eb57c6fb34df16ae2
+        - uuid: f41b94f92ca54f3285a4888e54771197
           name: 'DDoS Guard: firewall blocks per minute (counter)'
           type: TRAP
           key: 'ddosguard.firewall.rate'
@@ -163,7 +163,7 @@ zabbix_export:
             - tag: source
               value: ddosguard-agent
           triggers:
-            - uuid: 6dc1415292934246acb504e9dd0b278a
+            - uuid: 51a8ef3bb919474b98befe6e550f5045
               expression: 'min(/DDoS Guard - Agent/ddosguard.firewall.rate,10m)>=500'
               name: 'Volume alto de bloqueios de firewall em {HOST.NAME} (>= 500/min)'
               priority: HIGH
@@ -180,7 +180,7 @@ zabbix_export:
         # ------------------------------------------------------------------
         # Bloqueios de antivírus
         # ------------------------------------------------------------------
-        - uuid: c14cb46fea814d6a90b10c707d9b2367
+        - uuid: 269c99795a624ee0830506381ad2337a
           name: 'DDoS Guard: antivirus blocks per minute (counter)'
           type: TRAP
           key: 'ddosguard.antivirus.rate'
@@ -195,7 +195,7 @@ zabbix_export:
             - tag: source
               value: ddosguard-agent
           triggers:
-            - uuid: eb9df021c25241a5a46ff4a33714bf95
+            - uuid: 9244986e2c334681960e4e5aaea0ae3d
               expression: 'min(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>=5'
               name: 'Múltiplas detecções de malware em {HOST.NAME}'
               priority: HIGH
@@ -213,7 +213,7 @@ zabbix_export:
         # ------------------------------------------------------------------
         # Eventos raw JSON — recebidos pelo ingest.php e repassados
         # ------------------------------------------------------------------
-        - uuid: bf4d2d6470d04b078f9b782dbbcbd5dd
+        - uuid: eee58a609884451cbdef44afda8cda58
           name: 'DDoS Guard: raw attack event (JSON)'
           type: TRAP
           key: 'ddosguard.attack.event'
@@ -230,7 +230,7 @@ zabbix_export:
             - tag: source
               value: ddosguard-agent
 
-        - uuid: 44654956b5514796bea471b8ac1b0009
+        - uuid: 61d00bedf2424daf8b0836d8d3fb5c8e
           name: 'DDoS Guard: raw block event - firewall (JSON)'
           type: TRAP
           key: 'ddosguard.block.firewall'
@@ -246,7 +246,7 @@ zabbix_export:
             - tag: source
               value: ddosguard-agent
 
-        - uuid: 374eb41bcac241739397f4b3dab6f068
+        - uuid: 509f55e6bc9c4781b33cdbf061bea6e8
           name: 'DDoS Guard: raw block event - antivirus (JSON)'
           type: TRAP
           key: 'ddosguard.block.antivirus'
