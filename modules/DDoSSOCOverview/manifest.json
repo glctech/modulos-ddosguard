@@ -1,0 +1,22 @@
+{
+	"manifest_version": 2.0,
+	"id": "ddossocoverview",
+	"type": "widget",
+	"name": "DDoS Guard - SOC Overview",
+	"namespace": "DDoSSOCOverview",
+	"version": "2.3.0",
+	"author": "GLCTech",
+	"description": "Painel executivo do DDoS Guard SOC: KPIs em tempo real, linha do tempo de resposta ao incidente e feed de alertas recentes.",
+	"url": "",
+	"widget": {
+		"size": { "width": 72, "height": 8 },
+		"in": {
+			"hostids": { "type": "_hostids" },
+			"groupids": { "type": "_hostgroupids" }
+		},
+		"out": []
+	},
+	"actions": {
+		"widget.ddossocoverview.view": { "class": "WidgetView" }
+	}
+}

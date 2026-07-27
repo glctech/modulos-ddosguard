@@ -463,3 +463,66 @@ O Sophos Central não envia syslog nativo. Três opções:
 
 3. **XG como proxy** — configure o Sophos XG para receber eventos
    do Central e reencaminhar via syslog para o Zabbix.
+
+---
+
+## v2.4 — Revisão geral: templates, agente e módulos de dashboard (2026-07-27)
+
+### Templates — 53 itens corrigidos em 6 templates
+
+| Problema | Causa | Correção |
+|---|---|---|
+| Itens TRAP sem `delay` definido | Campo obrigatório omitido | `delay: '0'` (TRAP não faz polling) |
+| Itens sem `history` definido | Campo omitido | `30d` para numéricos, `7d` para texto/JSON |
+| Itens sem `trends` definido | Campo omitido | `365d` para numéricos, `0` para texto |
+| Macros sem `description` | Documentação ausente | Descrição adicionada em todas as macros |
+| UUIDs inválidos (com hífens) | Geração incorreta | `uuid.uuid4().hex` — 32 chars hex sem hífens |
+| UUIDs dos template_groups aleatórios | Não batem com o Zabbix | UUIDs oficiais do Zabbix 7.4 restaurados |
+
+**Templates atualizados:**
+
+| Template | Itens | Triggers | Macros |
+|---|---|---|---|
+| DDoS Guard - Security Monitoring | 8 | 5 | 0 |
+| DDoS Guard - Agent | 8 | 6 | 0 |
+| DDoS Guard - Agent Windows | 9 | 7 | 6 |
+| DDoS Guard - FortiGate Security | 8 | 7 | 9 |
+| DDoS Guard - FortiSwitch Security | 7 | 6 | 3 |
+| DDoS Guard - MikroTik Security | 11 | 12 | 10 |
+| DDoS Guard - Sophos Security | 9 | 8 | 7 |
+
+### Agente Python (ddos_guard_agent.py) — v2.0 → v2.4
+
+| Melhoria | Descrição |
+|---|---|
+| Graceful shutdown | `SIGTERM`/`SIGINT` encerram o agente limpo via `threading.Event` |
+| Retry com backoff | `send()` tenta 3× com espera 1s, 2s, 4s antes de desistir |
+| Versão no log | Startup mostra `v2.4.0`, host e interval |
+| Logging com nível | Prefixos `[INFO]`, `[WARN]`, `[ERROR]` em todos os logs |
+| Loop não-bloqueante | `_shutdown_event.wait(timeout=interval)` — shutdown imediato |
+| `agent_version` no payload | Enviado ao ingest para rastreabilidade de versão |
+| Verificação Python 3.8+ | Instalador valida versão mínima do Python |
+
+### Módulos de dashboard — v2.3 → visual unificado
+
+| Módulo | O que mudou |
+|---|---|
+| `DDoSSOCOverview` | Reescrito com `CWidgetView` — KPIs + timeline + alertas + hosts |
+| `DDoSMitreHeatmap` | Reescrito com `CWidgetView` — heatmap 6 táticas MITRE |
+| `DDoSTimeline` | Reescrito com `CWidgetView` — incidentes + MTTD/MTTA/MTTM |
+| `DDoSBlockMonitor` | View atualizada — cards com barra, top países, tabela melhorada |
+
+**Problema raiz dos widgets em branco:**
+As views retornavam HTML puro via `->show()` diretamente.
+O Zabbix 7.4 exige `(new CWidgetView($data))->addItem(...)->show()`
+para encapsular a resposta em JSON `{"name":"...","body":"...","messages":[]}`.
+
+### Formato de atualização do dashboard (RF rate)
+
+O dashboard atualiza a cada **60s** por padrão. Para tempo real (30s):
+```sql
+UPDATE widget SET rf_rate = 30
+WHERE dashboard_pageid IN (
+    SELECT dashboard_pageid FROM dashboard_page WHERE dashboardid = 407
+);
+```

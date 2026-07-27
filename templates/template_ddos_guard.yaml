@@ -1,258 +1,294 @@
 zabbix_export:
   version: '7.4'
   template_groups:
-    - uuid: 7df96b18c230490a9a0a9c7bf20dbb25
-      name: 'Templates/Security'
+  - uuid: 4d97ea2fc9154018a42a18c22e4c7ae5
+    name: Templates/Security
   templates:
-    - uuid: 05ca82b2df794cafab83905d6ab7358c
-      template: 'DDoS Guard - Security Monitoring'
-      name: 'DDoS Guard - Security Monitoring'
-      description: |
-        Módulo de detecção de ataques DDoS, força bruta, firewall e antivírus.
-        Recebe eventos via Zabbix Trapper (zabbix_sender / API) enviados pelo
-        coletor ddos_guard_agent.py (parsing de logs iptables/UFW/fail2ban,
-        ClamAV, Suricata/Snort) e expõe os dados via itens "Master" do tipo
-        texto/log que alimentam os widgets do dashboard (Ataques / Bloqueios).
+  - uuid: 732171c7301741c080e109c9ba05dd73
+    template: DDoS Guard - Security Monitoring
+    name: DDoS Guard - Security Monitoring
+    description: 'Módulo de detecção de ataques DDoS, força bruta, firewall e antivírus.
 
-        Instale junto com o módulo de frontend "DDoS Guard Dashboard".
-      groups:
-        - name: 'Templates/Security'
-      items:
-        - uuid: 367f5214779e4d0d830310241345960e
-          name: 'DDoS Guard: raw attack event (JSON)'
-          type: TRAP
-          key: 'ddosguard.attack.event'
-          value_type: TEXT
-          description: |
-            Item trapper que recebe 1 evento de ataque por chamada, em JSON:
-            {
-              "src_ip": "203.0.113.10",
-              "country": "RU",
-              "country_name": "Russia",
-              "city": "Moscow",
-              "attack_type": "SYN_FLOOD",
-              "target_port": 80,
-              "protocol": "TCP",
-              "attempts": 1540,
-              "first_seen": 1719500000,
-              "last_seen": 1719500900,
-              "source": "iptables",
-              "severity": "high",
-              "action": "blocked",
-              "blocked_by": "firewall"
-            }
-            Enviado pelo script ddos_guard_agent.py via zabbix_sender.
-          tags:
-            - tag: component
-              value: ddos
-        - uuid: 7dbc4109868b4940897533c4acf90210
-          name: 'DDoS Guard: raw block event - firewall (JSON)'
-          type: TRAP
-          key: 'ddosguard.block.firewall'
-          value_type: TEXT
-          description: |
-            Evento de bloqueio realizado pelo firewall (iptables/UFW/nftables/fail2ban).
-            JSON: {"src_ip":"x.x.x.x","country":"BR","rule":"INPUT DROP","port":22,
-            "protocol":"TCP","reason":"bruteforce_ssh","timestamp":1719500000}
-          tags:
-            - tag: component
-              value: firewall
-        - uuid: 19b496ce58ae498786e505367ce99389
-          name: 'DDoS Guard: raw block event - antivirus (JSON)'
-          type: TRAP
-          key: 'ddosguard.block.antivirus'
-          value_type: TEXT
-          description: |
-            Evento de detecção/bloqueio do antivírus (ClamAV ou outro EDR).
-            JSON: {"src_ip":"x.x.x.x","country":"CN","file":"/tmp/payload.elf",
-            "malware":"Win.Trojan.Generic-12345","action":"quarantined","timestamp":1719500000}
-          tags:
-            - tag: component
-              value: antivirus
-        - uuid: 4ba46de32f5c4fc580ad1be9aa939590
-          name: 'DDoS Guard: attacks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.attacks.rate'
-          value_type: UNSIGNED
-          description: 'Quantidade de tentativas de ataque detectadas no último intervalo de agregação (enviado pelo agente).'
-          tags:
-            - tag: component
-              value: ddos
-          triggers:
-            - uuid: f6da58e4bc8c4d918a32231cfe1e8338
-              expression: 'min(/DDoS Guard - Security Monitoring/ddosguard.attacks.rate,5m)>=200'
-              name: 'Possível ataque DDoS em andamento em {HOST.NAME} (>=200 tentativas/min por 5min)'
-              priority: DISASTER
-              description: 'Volume sustentado de tentativas de ataque muito acima do normal. Verifique o painel "DDoS Guard - Attack Monitor".'
-              tags:
-                - tag: scope
-                  value: availability
-                - tag: component
-                  value: ddos
-            - uuid: 97b1bbba3c794802aaa2e3fcf0c7bc64
-              expression: 'min(/DDoS Guard - Security Monitoring/ddosguard.attacks.rate,2m)>=50'
-              name: 'Pico de tentativas de ataque em {HOST.NAME} (>=50 tentativas/min)'
-              priority: HIGH
-              description: 'Aumento anormal no número de tentativas de ataque. Pode ser estágio inicial de DDoS, scan ou brute-force.'
-              tags:
-                - tag: scope
-                  value: availability
-                - tag: component
-                  value: ddos
-        - uuid: b42a5c2803484bf1917aad5246fab6b2
-          name: 'DDoS Guard: firewall blocks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.firewall.rate'
-          value_type: UNSIGNED
-          description: 'Quantidade de bloqueios de firewall no último intervalo de agregação.'
-          tags:
-            - tag: component
-              value: firewall
-        - uuid: f8c212d749054db5afbcd36b8f206d6b
-          name: 'DDoS Guard: antivirus blocks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.antivirus.rate'
-          value_type: UNSIGNED
-          description: 'Quantidade de detecções/bloqueios do antivírus no último intervalo de agregação.'
-          tags:
-            - tag: component
-              value: antivirus
-          triggers:
-            - uuid: c6f9977e88f8416385fd9dd780011c30
-              expression: 'min(/DDoS Guard - Security Monitoring/ddosguard.antivirus.rate,10m)>=10'
-              name: 'Múltiplas detecções de malware em {HOST.NAME}'
-              priority: HIGH
-              description: 'O antivírus detectou/bloqueou múltiplas ameaças em curto período. Verifique o host imediatamente.'
-              tags:
-                - tag: scope
-                  value: security
-                - tag: component
-                  value: antivirus
-        - uuid: 9deb156342234fc99a85ae6faec5f581
-          name: 'DDoS Guard: distinct source IPs (last 5 min)'
-          type: TRAP
-          key: 'ddosguard.distinct_ips.rate'
-          value_type: UNSIGNED
-          description: 'Número de IPs de origem distintos observados atacando nos últimos 5 minutos. Pico súbito indica DDoS distribuído.'
-          tags:
-            - tag: component
-              value: ddos
-          triggers:
-            - uuid: 305303fcf69b4f21ac54671701ed8fa7
-              expression: 'min(/DDoS Guard - Security Monitoring/ddosguard.distinct_ips.rate,5m)>=100'
-              name: 'Ataque distribuído (DDoS) detectado em {HOST.NAME} - muitas origens distintas'
-              priority: DISASTER
-              description: 'Grande número de IPs distintos atacando simultaneamente é característico de um ataque DDoS distribuído (botnet).'
-              tags:
-                - tag: scope
-                  value: availability
-                - tag: component
-                  value: ddos
-        - uuid: 7813430507a34bb1ac9bb66fc98fd93c
-          name: 'DDoS Guard: agent heartbeat'
-          type: TRAP
-          key: 'ddosguard.agent.heartbeat'
-          value_type: UNSIGNED
-          description: 'Heartbeat enviado pelo agente coletor a cada execução. Usado para alertar se o coletor parar de enviar dados.'
-          tags:
-            - tag: component
-              value: monitoring
-          triggers:
-            - uuid: 1bf919247bfc482791676538d82a6770
-              expression: 'nodata(/DDoS Guard - Security Monitoring/ddosguard.agent.heartbeat,15m)=1'
-              name: 'Agente DDoS Guard parou de enviar dados em {HOST.NAME}'
-              priority: WARNING
-              description: 'O coletor (ddos_guard_agent.py) não envia heartbeat há mais de 15 minutos. Verifique o serviço/cron no host monitorado.'
-              tags:
-                - tag: scope
-                  value: not_classified
-                - tag: component
-                  value: monitoring
-      dashboards:
-        - uuid: 6fee1cd0a9554cccb10f8c4473a9086a
-          name: 'DDoS Guard - Security Operations Center'
-          display_period: '30'
-          auto_start: 'YES'
-          pages:
-            - name: 'Visão geral'
-              widgets:
-                - type: ddosattackmonitor
-                  name: 'Ataques em tempo real'
-                  x: '0'
-                  y: '0'
-                  width: '72'
-                  height: '6'
-                  fields:
-                    - type: INTEGER
-                      name: time_range
-                      value: '60'
-                    - type: INTEGER
-                      name: show_lines
-                      value: '25'
-                    - type: INTEGER
-                      name: order_by
-                      value: '0'
-                    - type: INTEGER
-                      name: only_blocked
-                      value: '0'
-                - type: ddosblockmonitor
-                  name: 'Bloqueios: Firewall x Antivírus'
-                  x: '0'
-                  y: '6'
-                  width: '72'
-                  height: '6'
-                  fields:
-                    - type: INTEGER
-                      name: time_range
-                      value: '60'
-                    - type: INTEGER
-                      name: show_lines
-                      value: '25'
-                    - type: INTEGER
-                      name: block_source_filter
-                      value: '0'
-                - type: problems
-                  name: 'Alertas de segurança (DDoS Guard)'
-                  x: '0'
-                  y: '12'
-                  width: '72'
-                  height: '5'
-                  fields:
-                    - type: STRING
-                      name: tags.0.tag
-                      value: component
-                    - type: STRING
-                      name: tags.0.value
-                      value: ddos
-                    - type: INTEGER
-                      name: tags.0.operator
-                      value: '0'
-                    - type: STRING
-                      name: tags.1.tag
-                      value: component
-                    - type: STRING
-                      name: tags.1.value
-                      value: antivirus
-                    - type: INTEGER
-                      name: tags.1.operator
-                      value: '0'
-                    - type: INTEGER
-                      name: evaltype
-                      value: '2'
-                    - type: INTEGER
-                      name: show_lines
-                      value: '10'
-      valuemaps:
-        - uuid: 3848022b4806414d8730b2e2ca2ebe5c
-          name: 'DDoS Guard severity'
-          mappings:
-            - value: '0'
-              newvalue: Info
-            - value: '1'
-              newvalue: Low
-            - value: '2'
-              newvalue: Medium
-            - value: '3'
-              newvalue: High
-            - value: '4'
-              newvalue: Critical
+      Recebe eventos via Zabbix Trapper (zabbix_sender / API) enviados pelo
+
+      coletor ddos_guard_agent.py (parsing de logs iptables/UFW/fail2ban,
+
+      ClamAV, Suricata/Snort) e expõe os dados via itens "Master" do tipo
+
+      texto/log que alimentam os widgets do dashboard (Ataques / Bloqueios).
+
+
+      Instale junto com o módulo de frontend "DDoS Guard Dashboard".
+
+      '
+    groups:
+    - name: Templates/Security
+    items:
+    - uuid: 793311c901c749d0b15dc10b90d35e4d
+      name: 'DDoS Guard: raw attack event (JSON)'
+      type: TRAP
+      key: ddosguard.attack.event
+      value_type: TEXT
+      description: "Item trapper que recebe 1 evento de ataque por chamada, em JSON:\n\
+        {\n  \"src_ip\": \"203.0.113.10\",\n  \"country\": \"RU\",\n  \"country_name\"\
+        : \"Russia\",\n  \"city\": \"Moscow\",\n  \"attack_type\": \"SYN_FLOOD\",\n\
+        \  \"target_port\": 80,\n  \"protocol\": \"TCP\",\n  \"attempts\": 1540,\n\
+        \  \"first_seen\": 1719500000,\n  \"last_seen\": 1719500900,\n  \"source\"\
+        : \"iptables\",\n  \"severity\": \"high\",\n  \"action\": \"blocked\",\n \
+        \ \"blocked_by\": \"firewall\"\n}\nEnviado pelo script ddos_guard_agent.py\
+        \ via zabbix_sender.\n"
+      tags:
+      - tag: component
+        value: ddos
+      delay: '0'
+      history: 7d
+      trends: '0'
+    - uuid: 7ac916457efe4d29884aad07d4630a26
+      name: 'DDoS Guard: raw block event - firewall (JSON)'
+      type: TRAP
+      key: ddosguard.block.firewall
+      value_type: TEXT
+      description: 'Evento de bloqueio realizado pelo firewall (iptables/UFW/nftables/fail2ban).
+
+        JSON: {"src_ip":"x.x.x.x","country":"BR","rule":"INPUT DROP","port":22,
+
+        "protocol":"TCP","reason":"bruteforce_ssh","timestamp":1719500000}
+
+        '
+      tags:
+      - tag: component
+        value: firewall
+      delay: '0'
+      history: 7d
+      trends: '0'
+    - uuid: 041c99933f0748c0a659038220d5b410
+      name: 'DDoS Guard: raw block event - antivirus (JSON)'
+      type: TRAP
+      key: ddosguard.block.antivirus
+      value_type: TEXT
+      description: 'Evento de detecção/bloqueio do antivírus (ClamAV ou outro EDR).
+
+        JSON: {"src_ip":"x.x.x.x","country":"CN","file":"/tmp/payload.elf",
+
+        "malware":"Win.Trojan.Generic-12345","action":"quarantined","timestamp":1719500000}
+
+        '
+      tags:
+      - tag: component
+        value: antivirus
+      delay: '0'
+      history: 7d
+      trends: '0'
+    - uuid: 5d5323190e6b4c1eab8e43e3a4100b5e
+      name: 'DDoS Guard: attacks per minute (counter)'
+      type: TRAP
+      key: ddosguard.attacks.rate
+      value_type: UNSIGNED
+      description: Quantidade de tentativas de ataque detectadas no último intervalo
+        de agregação (enviado pelo agente).
+      tags:
+      - tag: component
+        value: ddos
+      triggers:
+      - uuid: 3e4dc7d21ed04eb4937e4eb0653626b9
+        expression: min(/DDoS Guard - Security Monitoring/ddosguard.attacks.rate,5m)>=200
+        name: Possível ataque DDoS em andamento em {HOST.NAME} (>=200 tentativas/min
+          por 5min)
+        priority: DISASTER
+        description: Volume sustentado de tentativas de ataque muito acima do normal.
+          Verifique o painel "DDoS Guard - Attack Monitor".
+        tags:
+        - tag: scope
+          value: availability
+        - tag: component
+          value: ddos
+      - uuid: 0b8e101b6b0249fdb2a9ffc1e9ba5aed
+        expression: min(/DDoS Guard - Security Monitoring/ddosguard.attacks.rate,2m)>=50
+        name: Pico de tentativas de ataque em {HOST.NAME} (>=50 tentativas/min)
+        priority: HIGH
+        description: Aumento anormal no número de tentativas de ataque. Pode ser estágio
+          inicial de DDoS, scan ou brute-force.
+        tags:
+        - tag: scope
+          value: availability
+        - tag: component
+          value: ddos
+      delay: '0'
+      history: 30d
+      trends: 365d
+    - uuid: 0f78d275afa94d0e86dbd2ad89bcbdad
+      name: 'DDoS Guard: firewall blocks per minute (counter)'
+      type: TRAP
+      key: ddosguard.firewall.rate
+      value_type: UNSIGNED
+      description: Quantidade de bloqueios de firewall no último intervalo de agregação.
+      tags:
+      - tag: component
+        value: firewall
+      delay: '0'
+      history: 30d
+      trends: 365d
+    - uuid: 97a993e465d64ad68310c142bbca7d98
+      name: 'DDoS Guard: antivirus blocks per minute (counter)'
+      type: TRAP
+      key: ddosguard.antivirus.rate
+      value_type: UNSIGNED
+      description: Quantidade de detecções/bloqueios do antivírus no último intervalo
+        de agregação.
+      tags:
+      - tag: component
+        value: antivirus
+      triggers:
+      - uuid: 6be29b2364c64ccd882dff6fd760267a
+        expression: min(/DDoS Guard - Security Monitoring/ddosguard.antivirus.rate,10m)>=10
+        name: Múltiplas detecções de malware em {HOST.NAME}
+        priority: HIGH
+        description: O antivírus detectou/bloqueou múltiplas ameaças em curto período.
+          Verifique o host imediatamente.
+        tags:
+        - tag: scope
+          value: security
+        - tag: component
+          value: antivirus
+      delay: '0'
+      history: 30d
+      trends: 365d
+    - uuid: d843dcba9f9f4ba99669d0705e7567ab
+      name: 'DDoS Guard: distinct source IPs (last 5 min)'
+      type: TRAP
+      key: ddosguard.distinct_ips.rate
+      value_type: UNSIGNED
+      description: Número de IPs de origem distintos observados atacando nos últimos
+        5 minutos. Pico súbito indica DDoS distribuído.
+      tags:
+      - tag: component
+        value: ddos
+      triggers:
+      - uuid: c07bfd0c25c04343bb1a717a83b41bb3
+        expression: min(/DDoS Guard - Security Monitoring/ddosguard.distinct_ips.rate,5m)>=100
+        name: Ataque distribuído (DDoS) detectado em {HOST.NAME} - muitas origens
+          distintas
+        priority: DISASTER
+        description: Grande número de IPs distintos atacando simultaneamente é característico
+          de um ataque DDoS distribuído (botnet).
+        tags:
+        - tag: scope
+          value: availability
+        - tag: component
+          value: ddos
+      delay: '0'
+      history: 30d
+      trends: 365d
+    - uuid: 561110da6e274d23955ea81a1ecac365
+      name: 'DDoS Guard: agent heartbeat'
+      type: TRAP
+      key: ddosguard.agent.heartbeat
+      value_type: UNSIGNED
+      description: Heartbeat enviado pelo agente coletor a cada execução. Usado para
+        alertar se o coletor parar de enviar dados.
+      tags:
+      - tag: component
+        value: monitoring
+      triggers:
+      - uuid: 469249dbae884d2c8ec266027ac58d9f
+        expression: nodata(/DDoS Guard - Security Monitoring/ddosguard.agent.heartbeat,15m)=1
+        name: Agente DDoS Guard parou de enviar dados em {HOST.NAME}
+        priority: WARNING
+        description: O coletor (ddos_guard_agent.py) não envia heartbeat há mais de
+          15 minutos. Verifique o serviço/cron no host monitorado.
+        tags:
+        - tag: scope
+          value: not_classified
+        - tag: component
+          value: monitoring
+      delay: '0'
+      history: 30d
+      trends: 365d
+    dashboards:
+    - uuid: f413508ec877404dae537bd69686bcce
+      name: DDoS Guard - Security Operations Center
+      display_period: '30'
+      auto_start: 'YES'
+      pages:
+      - name: Visão geral
+        widgets:
+        - type: ddosattackmonitor
+          name: Ataques em tempo real
+          x: '0'
+          y: '0'
+          width: '72'
+          height: '6'
+          fields:
+          - type: INTEGER
+            name: time_range
+            value: '60'
+          - type: INTEGER
+            name: show_lines
+            value: '25'
+          - type: INTEGER
+            name: order_by
+            value: '0'
+          - type: INTEGER
+            name: only_blocked
+            value: '0'
+        - type: ddosblockmonitor
+          name: 'Bloqueios: Firewall x Antivírus'
+          x: '0'
+          y: '6'
+          width: '72'
+          height: '6'
+          fields:
+          - type: INTEGER
+            name: time_range
+            value: '60'
+          - type: INTEGER
+            name: show_lines
+            value: '25'
+          - type: INTEGER
+            name: block_source_filter
+            value: '0'
+        - type: problems
+          name: Alertas de segurança (DDoS Guard)
+          x: '0'
+          y: '12'
+          width: '72'
+          height: '5'
+          fields:
+          - type: STRING
+            name: tags.0.tag
+            value: component
+          - type: STRING
+            name: tags.0.value
+            value: ddos
+          - type: INTEGER
+            name: tags.0.operator
+            value: '0'
+          - type: STRING
+            name: tags.1.tag
+            value: component
+          - type: STRING
+            name: tags.1.value
+            value: antivirus
+          - type: INTEGER
+            name: tags.1.operator
+            value: '0'
+          - type: INTEGER
+            name: evaltype
+            value: '2'
+          - type: INTEGER
+            name: show_lines
+            value: '10'
+    valuemaps:
+    - uuid: 57133d3253254dc99276bf1d14dd27ad
+      name: DDoS Guard severity
+      mappings:
+      - value: '0'
+        newvalue: Info
+      - value: '1'
+        newvalue: Low
+      - value: '2'
+        newvalue: Medium
+      - value: '3'
+        newvalue: High
+      - value: '4'
+        newvalue: Critical

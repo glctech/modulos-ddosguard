@@ -1,581 +1,550 @@
 zabbix_export:
   version: '7.4'
   template_groups:
-    - uuid: 36bff6c29af64692839d077febfc7079
-      name: 'Templates/Network devices'
-    - uuid: 7df96b18c230490a9a0a9c7bf20dbb25
-      name: 'Templates/Security'
+  - uuid: 6910b616f0ac4e3aa1ecacb0dfb8dc44
+    name: Templates/Network devices
+  - uuid: 431a1e1425444852834b4df8fe4be704
+    name: Templates/Security
   templates:
+  - uuid: 402fec3716ea4cefa46464cf74f75cb8
+    template: DDoS Guard - FortiGate Security
+    name: DDoS Guard - FortiGate Security
+    description: "Template de seguranca DDoS Guard para FortiGate.\nComplementa o\
+      \ \"FortiGate by SNMP\" com triggers de seguranca\nbaseadas nos contadores IPS/VPN/Session\
+      \ do SNMP, mais itens\ntrapper para receber eventos via syslog (syslog_receiver.php).\n\
+      \nCONFIGURACAO NO FORTIGATE:\n  config log syslogd setting\n    set status enable\n\
+      \    set server IP_DO_APPLIANCE_ZABBIX\n    set port 514\n    set format default\n\
+      \    set facility local7\n  end\n\n  # Para enviar alertas de UTM/IPS/AV tambem:\n\
+      \  config log syslogd filter\n    set severity warning\n    set forward-traffic\
+      \ enable\n    set local-traffic disable\n    set multicast-traffic disable\n\
+      \    set sniffer-traffic disable\n    set ztna-traffic disable\n  end\n\nCONFIGURACAO\
+      \ SNMP NO FORTIGATE:\n  config system snmp community\n    edit 1\n      set\
+      \ name \"zabbix\"\n      config hosts\n        edit 1\n          set ip IP_DO_APPLIANCE_ZABBIX/32\n\
+      \        next\n      end\n    next\n  end\n\nRequer: \"FortiGate by SNMP\" associado\
+      \ ao mesmo host\nCompativel com: Zabbix 7.4+ | FortiOS 7.0+\n"
+    groups:
+    - name: Templates/Network devices
+    - name: Templates/Security
+    macros:
+    - macro: '{$FG.IPS.BLOCK.WARN}'
+      value: '100'
+      description: Threshold de bloqueios IPS/min para trigger WARNING
+    - macro: '{$FG.IPS.BLOCK.HIGH}'
+      value: '1000'
+      description: Threshold de bloqueios IPS/min para trigger HIGH
+    - macro: '{$FG.SESSION.WARN}'
+      value: '50000'
+      description: Threshold de sessoes ativas para trigger WARNING
+    - macro: '{$FG.SESSION.HIGH}'
+      value: '100000'
+      description: Threshold de sessoes ativas para trigger HIGH
+    - macro: '{$FG.VPN.LOSS.WARN}'
+      value: '20'
+      description: '% de perda de pacotes VPN para trigger WARNING'
+    - macro: '{$FG.CPU.WARN}'
+      value: '80'
+      description: '% CPU para trigger WARNING'
+    - macro: '{$FG.MEM.WARN}'
+      value: '85'
+      description: '% Memoria para trigger WARNING'
+    - macro: '{$DG.INGEST_TOKEN}'
+      value: ''
+      description: Token DDoS Guard (ingest.config.php DG_INGEST_TOKEN)
+    - macro: '{$DG.ZBX_HOST}'
+      value: ''
+      description: Nome do host no Zabbix DDoS Guard (zbx_host no agent.conf)
+    items:
+    - uuid: 65b39a7d67674bd2b33abd76df3ab15c
+      name: 'DDoS Guard: FortiGate firewall blocks per minute'
+      type: TRAP
+      key: ddosguard.firewall.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Bloqueios de firewall recebidos via syslog do FortiGate.
 
-    # ==================================================================
-    # TEMPLATE 1: DDoS Guard - FortiGate Security
-    # ==================================================================
-    # Complementa o template "FortiGate by SNMP" com:
-    #   - Triggers de seguranca baseadas nos itens IPS/VPN/Session
-    #   - Itens trapper para receber eventos do syslog_receiver.php
-    #   - Correlacao com o motor DDoS Guard
-    #   - Macros configuráveis por dispositivo
-    #
-    # Uso:
-    #   1. Associe "FortiGate by SNMP" no host (SNMP polling)
-    #   2. Associe "DDoS Guard - FortiGate Security" no mesmo host
-    #   3. Configure o FortiGate para enviar syslog:
-    #      config log syslogd setting
-    #        set status enable
-    #        set server IP_DO_APPLIANCE
-    #        set port 514
-    #        set format default
-    #      end
-    # ==================================================================
-    - uuid: 8350c20818f74b758110b475f581a372
-      template: 'DDoS Guard - FortiGate Security'
-      name: 'DDoS Guard - FortiGate Security'
-      description: |
-        Template de seguranca DDoS Guard para FortiGate.
-        Complementa o "FortiGate by SNMP" com triggers de seguranca
-        baseadas nos contadores IPS/VPN/Session do SNMP, mais itens
-        trapper para receber eventos via syslog (syslog_receiver.php).
+        Populado pelo syslog_receiver.php quando o FortiGate
 
-        CONFIGURACAO NO FORTIGATE:
-          config log syslogd setting
-            set status enable
-            set server IP_DO_APPLIANCE_ZABBIX
-            set port 514
-            set format default
-            set facility local7
-          end
+        envia logs de action=block/deny/drop.
 
-          # Para enviar alertas de UTM/IPS/AV tambem:
-          config log syslogd filter
-            set severity warning
-            set forward-traffic enable
-            set local-traffic disable
-            set multicast-traffic disable
-            set sniffer-traffic disable
-            set ztna-traffic disable
-          end
+        '
+      tags:
+      - tag: component
+        value: firewall
+      - tag: source
+        value: fortigate
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: 3d297246924b4852974b0098a6576389
+        expression: min(/DDoS Guard - FortiGate Security/ddosguard.firewall.rate,10m)>={$FG.IPS.BLOCK.HIGH}
+        name: 'FortiGate: Volume critico de bloqueios em {HOST.NAME} (>={$FG.IPS.BLOCK.HIGH}/min)'
+        priority: HIGH
+        description: 'O FortiGate esta bloqueando um volume critico de conexoes.
 
-        CONFIGURACAO SNMP NO FORTIGATE:
-          config system snmp community
-            edit 1
-              set name "zabbix"
-              config hosts
-                edit 1
-                  set ip IP_DO_APPLIANCE_ZABBIX/32
-                next
-              end
-            next
-          end
+          Possivel ataque DDoS em andamento.
 
-        Requer: "FortiGate by SNMP" associado ao mesmo host
-        Compativel com: Zabbix 7.4+ | FortiOS 7.0+
-      groups:
-        - name: 'Templates/Network devices'
-        - name: 'Templates/Security'
+          Verifique o dashboard DDoS Guard Security Operations Center.
 
-      macros:
-        - macro: '{$FG.IPS.BLOCK.WARN}'
-          value: '100'
-          description: 'Threshold de bloqueios IPS/min para trigger WARNING'
-        - macro: '{$FG.IPS.BLOCK.HIGH}'
-          value: '1000'
-          description: 'Threshold de bloqueios IPS/min para trigger HIGH'
-        - macro: '{$FG.SESSION.WARN}'
-          value: '50000'
-          description: 'Threshold de sessoes ativas para trigger WARNING'
-        - macro: '{$FG.SESSION.HIGH}'
-          value: '100000'
-          description: 'Threshold de sessoes ativas para trigger HIGH'
-        - macro: '{$FG.VPN.LOSS.WARN}'
-          value: '20'
-          description: '% de perda de pacotes VPN para trigger WARNING'
-        - macro: '{$FG.CPU.WARN}'
-          value: '80'
-          description: '% CPU para trigger WARNING'
-        - macro: '{$FG.MEM.WARN}'
-          value: '85'
-          description: '% Memoria para trigger WARNING'
-        - macro: '{$DG.INGEST_TOKEN}'
-          value: ''
-          description: 'Token DDoS Guard (ingest.config.php DG_INGEST_TOKEN)'
-        - macro: '{$DG.ZBX_HOST}'
-          value: ''
-          description: 'Nome do host no Zabbix DDoS Guard (zbx_host no agent.conf)'
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: 040f337f0bc844b09272aa5c597a2ecd
+      name: 'DDoS Guard: FortiGate attack event (JSON)'
+      type: TRAP
+      key: ddosguard.attack.event
+      value_type: TEXT
+      history: 7d
+      description: 'Evento JSON de ataque detectado pelo FortiGate via syslog.
 
-      items:
+        Inclui: src_ip, country, attack_type, severity, rule_id, policy.
 
-        # ----------------------------------------------------------------
-        # Itens trapper — recebem eventos via syslog_receiver.php
-        # ----------------------------------------------------------------
-        - uuid: 50c2465f5fab4f92a7fd4726d31b4841
-          name: 'DDoS Guard: FortiGate firewall blocks per minute'
-          type: TRAP
-          key: 'ddosguard.firewall.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Bloqueios de firewall recebidos via syslog do FortiGate.
-            Populado pelo syslog_receiver.php quando o FortiGate
-            envia logs de action=block/deny/drop.
-          tags:
-            - tag: component
-              value: firewall
-            - tag: source
-              value: fortigate
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: b8c4b43cabea4bd09c26506b9263237d
-              expression: 'min(/DDoS Guard - FortiGate Security/ddosguard.firewall.rate,10m)>={$FG.IPS.BLOCK.HIGH}'
-              name: 'FortiGate: Volume critico de bloqueios em {HOST.NAME} (>={$FG.IPS.BLOCK.HIGH}/min)'
-              priority: HIGH
-              description: |
-                O FortiGate esta bloqueando um volume critico de conexoes.
-                Possivel ataque DDoS em andamento.
-                Verifique o dashboard DDoS Guard Security Operations Center.
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
+        '
+      tags:
+      - tag: component
+        value: ddos
+      - tag: source
+        value: fortigate
+      delay: '0'
+      trends: '0'
+    - uuid: c98e777f47274e6bae9596ade1fdc32d
+      name: 'DDoS Guard: FortiGate block event (JSON)'
+      type: TRAP
+      key: ddosguard.block.firewall
+      value_type: TEXT
+      history: 7d
+      description: 'Evento JSON de bloqueio do FortiGate via syslog.
 
-        - uuid: a6f0bd22b4b1471fabf1e235e7daec09
-          name: 'DDoS Guard: FortiGate attack event (JSON)'
-          type: TRAP
-          key: 'ddosguard.attack.event'
-          value_type: TEXT
-          history: 7d
-          description: |
-            Evento JSON de ataque detectado pelo FortiGate via syslog.
-            Inclui: src_ip, country, attack_type, severity, rule_id, policy.
-          tags:
-            - tag: component
-              value: ddos
-            - tag: source
-              value: fortigate
+        Inclui: src_ip, country, tool=fortigate, policyid, action, severity.
 
-        - uuid: 358b57cbe8fe478abda9f8c76c392bf4
-          name: 'DDoS Guard: FortiGate block event (JSON)'
-          type: TRAP
-          key: 'ddosguard.block.firewall'
-          value_type: TEXT
-          history: 7d
-          description: |
-            Evento JSON de bloqueio do FortiGate via syslog.
-            Inclui: src_ip, country, tool=fortigate, policyid, action, severity.
-          tags:
-            - tag: component
-              value: firewall
-            - tag: source
-              value: fortigate
+        '
+      tags:
+      - tag: component
+        value: firewall
+      - tag: source
+        value: fortigate
+      delay: '0'
+      trends: '0'
+    - uuid: 4a03739f4c744a36b4d4f1a504224465
+      name: 'DDoS Guard: FortiGate AV block event (JSON)'
+      type: TRAP
+      key: ddosguard.block.antivirus
+      value_type: TEXT
+      history: 7d
+      description: 'Evento JSON de deteccao de malware pelo FortiGate AV via syslog.
 
-        - uuid: 7d73e3790fd54185930e557f085657a3
-          name: 'DDoS Guard: FortiGate AV block event (JSON)'
-          type: TRAP
-          key: 'ddosguard.block.antivirus'
-          value_type: TEXT
-          history: 7d
-          description: |
-            Evento JSON de deteccao de malware pelo FortiGate AV via syslog.
-            Inclui: src_ip, malware, action, file, severity.
-          tags:
-            - tag: component
-              value: antivirus
-            - tag: source
-              value: fortigate
+        Inclui: src_ip, malware, action, file, severity.
 
-        # ----------------------------------------------------------------
-        # Triggers nos itens SNMP existentes do "FortiGate by SNMP"
-        # (referencias cruzadas — requerem o template SNMP associado)
-        # ----------------------------------------------------------------
+        '
+      tags:
+      - tag: component
+        value: antivirus
+      - tag: source
+        value: fortigate
+      delay: '0'
+      trends: '0'
+    - uuid: eaedfc90d77e475ea0d966f6489764c9
+      name: 'DDoS Guard: IPS blocked intrusions rate'
+      type: CALCULATED
+      key: ddosguard.fg.ips.blocks.rate
+      delay: 1m
+      params: change(//ips.blocked[fgIpsIntrusionsBlocked.0])
+      value_type: FLOAT
+      units: /min
+      history: 30d
+      description: 'Taxa de bloqueios IPS por minuto calculada a partir do
 
-        # IPS — Bloqueios
-        - uuid: b7a9157a0d604537ae11f61c47da0367
-          name: 'DDoS Guard: IPS blocked intrusions rate'
-          type: CALCULATED
-          key: 'ddosguard.fg.ips.blocks.rate'
-          delay: 1m
-          params: 'change(//ips.blocked[fgIpsIntrusionsBlocked.0])'
-          value_type: FLOAT
-          units: '/min'
-          history: 30d
-          description: |
-            Taxa de bloqueios IPS por minuto calculada a partir do
-            contador SNMP fgIpsIntrusionsBlocked.
-            Requer item "Blocked intrusions" do template FortiGate by SNMP.
-          tags:
-            - tag: component
-              value: ips
-            - tag: source
-              value: fortigate
-          triggers:
-            - uuid: 203d87058ba749a69d402fc9229dc805
-              expression: 'avg(/DDoS Guard - FortiGate Security/ddosguard.fg.ips.blocks.rate,5m)>={$FG.IPS.BLOCK.WARN}'
-              name: 'FortiGate: Pico de bloqueios IPS em {HOST.NAME} (>={$FG.IPS.BLOCK.WARN}/min)'
-              priority: WARNING
-              description: |
-                O IPS do FortiGate esta bloqueando um volume elevado de intrusoes.
-                Verifique: FortiGate > Security Profiles > Intrusion Prevention
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
-            - uuid: 5d42f59fdcb74f23917a22deb9ded2a3
-              expression: 'avg(/DDoS Guard - FortiGate Security/ddosguard.fg.ips.blocks.rate,5m)>={$FG.IPS.BLOCK.HIGH}'
-              name: 'FortiGate: Ataque detectado pelo IPS em {HOST.NAME} (>={$FG.IPS.BLOCK.HIGH}/min)'
-              priority: HIGH
-              description: |
-                Volume critico de bloqueios IPS — possivel ataque em andamento.
-                Acao recomendada:
-                  1. Verifique FortiGate > Log & Report > Intrusion Prevention
-                  2. Identifique o IP de origem predominante
-                  3. Adicione ACL upstream se necessario
-              manual_close: 'YES'
-              dependencies:
-                - name: 'FortiGate: Pico de bloqueios IPS em {HOST.NAME} (>={$FG.IPS.BLOCK.WARN}/min)'
-                  expression: 'avg(/DDoS Guard - FortiGate Security/ddosguard.fg.ips.blocks.rate,5m)>={$FG.IPS.BLOCK.WARN}'
-              tags:
-                - tag: scope
-                  value: security
+        contador SNMP fgIpsIntrusionsBlocked.
 
-        # Sessoes ativas — indicador de saturacao/DDoS
-        - uuid: 811e7371b0fd4f31b65469cca48a08bf
-          name: 'DDoS Guard: Active sessions alert'
-          type: CALCULATED
-          key: 'ddosguard.fg.sessions.alert'
-          delay: 1m
-          params: 'last(//net.ipv4.sessions[fgSysSesCount.0])'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Monitor de sessoes ativas com thresholds de alerta.
-            Alto numero de sessoes pode indicar ataque DDoS saturando o FortiGate.
-            Requer item "IPv4 Active sessions" do template FortiGate by SNMP.
-          tags:
-            - tag: component
-              value: sessions
-            - tag: source
-              value: fortigate
-          triggers:
-            - uuid: 3dcfdd5d6b764223895f0a991df2b42b
-              expression: 'last(/DDoS Guard - FortiGate Security/ddosguard.fg.sessions.alert)>={$FG.SESSION.HIGH}'
-              name: 'FortiGate: Saturacao de sessoes em {HOST.NAME} (>={$FG.SESSION.HIGH})'
-              priority: HIGH
-              description: |
-                Numero de sessoes ativas muito acima do normal.
-                Indicativo de ataque DDoS ou vazamento de conexoes.
-                Verifique: FortiGate > Dashboard > Sessions
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
-            - uuid: 975fbc69be7e41ef818b7500cf252d2e
-              expression: 'last(/DDoS Guard - FortiGate Security/ddosguard.fg.sessions.alert)>={$FG.SESSION.WARN}'
-              name: 'FortiGate: Alto numero de sessoes em {HOST.NAME} (>={$FG.SESSION.WARN})'
-              priority: WARNING
-              manual_close: 'YES'
-              dependencies:
-                - name: 'FortiGate: Saturacao de sessoes em {HOST.NAME} (>={$FG.SESSION.HIGH})'
-                  expression: 'last(/DDoS Guard - FortiGate Security/ddosguard.fg.sessions.alert)>={$FG.SESSION.HIGH}'
-              tags:
-                - tag: scope
-                  value: availability
+        Requer item "Blocked intrusions" do template FortiGate by SNMP.
 
-        # VPN — Monitoramento de tuneis caidos
-        - uuid: 264970d81177442f9ce18bf0d7b72805
-          name: 'DDoS Guard: VPN tunnels down'
-          type: CALCULATED
-          key: 'ddosguard.fg.vpn.down'
-          delay: 2m
-          params: 'last(//vpn.tunnel.active[fgVpnTunnelUpCount.0])'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Numero de tuneis VPN IPsec ativos.
-            Queda subita pode indicar ataque ou falha de conectividade.
-            Requer item "Active IPsec VPN tunnels" do template FortiGate by SNMP.
-          tags:
-            - tag: component
-              value: vpn
-            - tag: source
-              value: fortigate
-          triggers:
-            - uuid: 3ff107264a7f4d4faa2d80aace32f0d3
-              expression: |
-                change(/DDoS Guard - FortiGate Security/ddosguard.fg.vpn.down)<-2
-                and last(/DDoS Guard - FortiGate Security/ddosguard.fg.vpn.down)>=0
-              name: 'FortiGate: Queda de tuneis VPN em {HOST.NAME} (perdeu mais de 2 tuneis)'
-              priority: HIGH
-              description: |
-                Mais de 2 tuneis VPN IPsec cairam em menos de 2 minutos.
-                Possivel ataque ou perda de conectividade upstream.
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
+        '
+      tags:
+      - tag: component
+        value: ips
+      - tag: source
+        value: fortigate
+      triggers:
+      - uuid: 003db56a25cc48948e9d93e83caa2e28
+        expression: avg(/DDoS Guard - FortiGate Security/ddosguard.fg.ips.blocks.rate,5m)>={$FG.IPS.BLOCK.WARN}
+        name: 'FortiGate: Pico de bloqueios IPS em {HOST.NAME} (>={$FG.IPS.BLOCK.WARN}/min)'
+        priority: WARNING
+        description: 'O IPS do FortiGate esta bloqueando um volume elevado de intrusoes.
 
-        # Heartbeat DDoS Guard
-        - uuid: c08ccb5731ee4245a96125253c12ef4f
-          name: 'DDoS Guard: agent heartbeat'
-          type: TRAP
-          key: 'ddosguard.agent.heartbeat'
-          value_type: UNSIGNED
-          history: 7d
-          description: |
-            Heartbeat do syslog_receiver.php — confirma que o pipeline
-            FortiGate → syslog → DDoS Guard esta funcionando.
-          tags:
-            - tag: component
-              value: monitoring
-            - tag: source
-              value: fortigate
-          triggers:
-            - uuid: 96cd6ecae89240da87990689e81f491f
-              expression: 'nodata(/DDoS Guard - FortiGate Security/ddosguard.agent.heartbeat,30m)=1'
-              name: 'FortiGate: Pipeline DDoS Guard parou em {HOST.NAME}'
-              priority: WARNING
-              description: |
-                O syslog_receiver.php nao recebe eventos do FortiGate ha mais de 30min.
-                Verifique:
-                  1. Configuracao de syslog no FortiGate
-                  2. Servico rsyslog no appliance: systemctl status rsyslog
-                  3. Porta 514 UDP aberta no appliance
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
+          Verifique: FortiGate > Security Profiles > Intrusion Prevention
 
-    # ==================================================================
-    # TEMPLATE 2: DDoS Guard - FortiSwitch Security
-    # ==================================================================
-    # Monitoramento de seguranca para FortiSwitch via syslog.
-    # Detecta: port security violations, MAC spoofing, loops,
-    # autenticacao 802.1X falhada, DHCP snooping violations.
-    # ==================================================================
-    - uuid: 11dfffebd54847fe808c5f5c12fd8fce
-      template: 'DDoS Guard - FortiSwitch Security'
-      name: 'DDoS Guard - FortiSwitch Security'
-      description: |
-        Template de seguranca DDoS Guard para FortiSwitch.
-        Detecta via syslog: port security violations, MAC spoofing,
-        loops de rede, autenticacao 802.1X falhada, DHCP snooping.
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      - uuid: a4cd331ab33b4abd8ab5cb6a8838b910
+        expression: avg(/DDoS Guard - FortiGate Security/ddosguard.fg.ips.blocks.rate,5m)>={$FG.IPS.BLOCK.HIGH}
+        name: 'FortiGate: Ataque detectado pelo IPS em {HOST.NAME} (>={$FG.IPS.BLOCK.HIGH}/min)'
+        priority: HIGH
+        description: "Volume critico de bloqueios IPS — possivel ataque em andamento.\n\
+          Acao recomendada:\n  1. Verifique FortiGate > Log & Report > Intrusion Prevention\n\
+          \  2. Identifique o IP de origem predominante\n  3. Adicione ACL upstream\
+          \ se necessario\n"
+        manual_close: 'YES'
+        dependencies:
+        - name: 'FortiGate: Pico de bloqueios IPS em {HOST.NAME} (>={$FG.IPS.BLOCK.WARN}/min)'
+          expression: avg(/DDoS Guard - FortiGate Security/ddosguard.fg.ips.blocks.rate,5m)>={$FG.IPS.BLOCK.WARN}
+        tags:
+        - tag: scope
+          value: security
+      trends: 365d
+    - uuid: e7a25415fe794b6b84ecb4ff72fe8fa3
+      name: 'DDoS Guard: Active sessions alert'
+      type: CALCULATED
+      key: ddosguard.fg.sessions.alert
+      delay: 1m
+      params: last(//net.ipv4.sessions[fgSysSesCount.0])
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Monitor de sessoes ativas com thresholds de alerta.
 
-        CONFIGURACAO NO FORTISWITCH (gerenciado pelo FortiGate):
-          # Via FortiGate > WiFi & Switch Controller > Managed FortiSwitches
-          # Em cada switch: Edit > Logging > Enable syslog
+        Alto numero de sessoes pode indicar ataque DDoS saturando o FortiGate.
 
-          # Ou via CLI do FortiSwitch:
-          config log syslogd setting
-            set status enable
-            set server IP_DO_APPLIANCE_ZABBIX
-            set port 514
-          end
+        Requer item "IPv4 Active sessions" do template FortiGate by SNMP.
 
-        CONFIGURACAO FORTISWITCH STANDALONE:
-          config system syslog
-            set server IP_DO_APPLIANCE_ZABBIX
-            set port 514
-          end
+        '
+      tags:
+      - tag: component
+        value: sessions
+      - tag: source
+        value: fortigate
+      triggers:
+      - uuid: d0eb3f915aaf48799d1be640b67176ae
+        expression: last(/DDoS Guard - FortiGate Security/ddosguard.fg.sessions.alert)>={$FG.SESSION.HIGH}
+        name: 'FortiGate: Saturacao de sessoes em {HOST.NAME} (>={$FG.SESSION.HIGH})'
+        priority: HIGH
+        description: 'Numero de sessoes ativas muito acima do normal.
 
-        Compativel com: Zabbix 7.4+ | FortiSwitchOS 7.0+
-      groups:
-        - name: 'Templates/Network devices'
-        - name: 'Templates/Security'
+          Indicativo de ataque DDoS ou vazamento de conexoes.
 
-      macros:
-        - macro: '{$FSW.PORT.VIOLATIONS.WARN}'
-          value: '10'
-          description: 'Violacoes de port security por 5min para WARNING'
-        - macro: '{$FSW.MAC.SPOOF.WARN}'
-          value: '5'
-          description: 'Eventos de MAC spoofing por 5min para HIGH'
-        - macro: '{$FSW.DOT1X.FAIL.WARN}'
-          value: '20'
-          description: 'Falhas de autenticacao 802.1X por 5min para WARNING'
+          Verifique: FortiGate > Dashboard > Sessions
 
-      items:
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+      - uuid: 6914bbe5712c4a41bfe1f10f03aa4fa2
+        expression: last(/DDoS Guard - FortiGate Security/ddosguard.fg.sessions.alert)>={$FG.SESSION.WARN}
+        name: 'FortiGate: Alto numero de sessoes em {HOST.NAME} (>={$FG.SESSION.WARN})'
+        priority: WARNING
+        manual_close: 'YES'
+        dependencies:
+        - name: 'FortiGate: Saturacao de sessoes em {HOST.NAME} (>={$FG.SESSION.HIGH})'
+          expression: last(/DDoS Guard - FortiGate Security/ddosguard.fg.sessions.alert)>={$FG.SESSION.HIGH}
+        tags:
+        - tag: scope
+          value: availability
+      trends: 365d
+    - uuid: bccc4e015a08463cbef1e3b315341d9d
+      name: 'DDoS Guard: VPN tunnels down'
+      type: CALCULATED
+      key: ddosguard.fg.vpn.down
+      delay: 2m
+      params: last(//vpn.tunnel.active[fgVpnTunnelUpCount.0])
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Numero de tuneis VPN IPsec ativos.
 
-        # ----------------------------------------------------------------
-        # Itens trapper via syslog
-        # ----------------------------------------------------------------
-        - uuid: 600001dc425245eb9fdd5f73f02613bf
-          name: 'DDoS Guard: FortiSwitch security events'
-          type: TRAP
-          key: 'ddosguard.attack.event'
-          value_type: TEXT
-          history: 7d
-          description: |
-            Eventos de seguranca do FortiSwitch recebidos via syslog.
-            Inclui: port security violation, MAC spoofing, loop detection,
-            802.1X failure, DHCP snooping violation.
-          tags:
-            - tag: component
-              value: network
-            - tag: source
-              value: fortiswitch
+        Queda subita pode indicar ataque ou falha de conectividade.
 
-        - uuid: 548153c407f94f83800e92727e6a4c82
-          name: 'DDoS Guard: FortiSwitch blocks per minute'
-          type: TRAP
-          key: 'ddosguard.firewall.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Taxa de bloqueios de seguranca do FortiSwitch por minuto.
-          tags:
-            - tag: component
-              value: network
-            - tag: source
-              value: fortiswitch
-          triggers:
-            - uuid: 5982ca69d0334524924128dca6c8fc85
-              expression: 'min(/DDoS Guard - FortiSwitch Security/ddosguard.firewall.rate,5m)>={$FSW.PORT.VIOLATIONS.WARN}'
-              name: 'FortiSwitch: Alto volume de violacoes de seguranca em {HOST.NAME}'
-              priority: HIGH
-              description: |
-                O FortiSwitch esta detectando um volume elevado de violacoes de seguranca.
-                Possivel: MAC spoofing, port security violation, DHCP starvation.
-                Verifique: FortiSwitch > Log > Event Log
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
+        Requer item "Active IPsec VPN tunnels" do template FortiGate by SNMP.
 
-        # Port Security Violations
-        - uuid: 0b7fd5ca83bb447b9ceaa03340a35f60
-          name: 'DDoS Guard: FortiSwitch port security violations'
-          type: TRAP
-          key: 'ddosguard.fsw.port.violations'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Numero de violacoes de port security detectadas.
-            Gerado quando um MAC nao autorizado tenta acessar uma porta protegida.
-          tags:
-            - tag: component
-              value: network
-            - tag: source
-              value: fortiswitch
-          triggers:
-            - uuid: cbdfecbc02444d6f808ab3de4cb41915
-              expression: 'sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.port.violations,5m)>={$FSW.PORT.VIOLATIONS.WARN}'
-              name: 'FortiSwitch: Violacoes de port security em {HOST.NAME}'
-              priority: HIGH
-              description: |
-                Multiplas violacoes de port security detectadas.
-                Possivel dispositivo nao autorizado conectado a rede.
-                Identifique a porta e o MAC de origem nos logs do switch.
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
+        '
+      tags:
+      - tag: component
+        value: vpn
+      - tag: source
+        value: fortigate
+      triggers:
+      - uuid: a6a2db959f4e48bfb7a5b7aba8d9a89b
+        expression: 'change(/DDoS Guard - FortiGate Security/ddosguard.fg.vpn.down)<-2
 
-        # MAC Spoofing
-        - uuid: 072c373447334eff90f0ab3df9fdaf77
-          name: 'DDoS Guard: FortiSwitch MAC spoofing events'
-          type: TRAP
-          key: 'ddosguard.fsw.mac.spoof'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Eventos de MAC spoofing detectados pelo FortiSwitch.
-            Um MAC address aparecendo em portas diferentes simultaneamente.
-          tags:
-            - tag: component
-              value: network
-            - tag: source
-              value: fortiswitch
-          triggers:
-            - uuid: 3bdc6d8e276a489e98a25d02c75f81a8
-              expression: 'sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.mac.spoof,5m)>={$FSW.MAC.SPOOF.WARN}'
-              name: 'FortiSwitch: MAC Spoofing detectado em {HOST.NAME}'
-              priority: HIGH
-              description: |
-                Possivel ataque de MAC spoofing detectado.
-                Um MAC address apareceu em multiplas portas — pode ser ARP spoofing.
-                Acao: isolar as portas envolvidas e investigar o dispositivo.
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
+          and last(/DDoS Guard - FortiGate Security/ddosguard.fg.vpn.down)>=0
 
-        # 802.1X Authentication Failures
-        - uuid: 8165c2636d3b41d1b9d361255804ff69
-          name: 'DDoS Guard: FortiSwitch 802.1X auth failures'
-          type: TRAP
-          key: 'ddosguard.fsw.dot1x.failures'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Falhas de autenticacao 802.1X (NAC) no FortiSwitch.
-            Alto volume pode indicar dispositivos nao autorizados tentando acesso.
-          tags:
-            - tag: component
-              value: network
-            - tag: source
-              value: fortiswitch
-          triggers:
-            - uuid: 4aa6aaee59c9486f975a526109340125
-              expression: 'sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.dot1x.failures,5m)>={$FSW.DOT1X.FAIL.WARN}'
-              name: 'FortiSwitch: Alto volume de falhas 802.1X em {HOST.NAME}'
-              priority: WARNING
-              description: |
-                Multiplas falhas de autenticacao 802.1X detectadas.
-                Possivel tentativa de acesso com dispositivos nao registrados.
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
+          '
+        name: 'FortiGate: Queda de tuneis VPN em {HOST.NAME} (perdeu mais de 2 tuneis)'
+        priority: HIGH
+        description: 'Mais de 2 tuneis VPN IPsec cairam em menos de 2 minutos.
 
-        # Loop Detection
-        - uuid: 3dc1014df2b54a1dbbd2f4d13884c407
-          name: 'DDoS Guard: FortiSwitch loop detected'
-          type: TRAP
-          key: 'ddosguard.fsw.loop.detected'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Loop de rede detectado pelo FortiSwitch (STP/RSTP ou loop guard).
-            Loops causam broadcast storms que degradam severamente a rede.
-          tags:
-            - tag: component
-              value: network
-            - tag: source
-              value: fortiswitch
-          triggers:
-            - uuid: c2ec8293e93a47cf87003ddf812f9451
-              expression: 'last(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.loop.detected)>0'
-              name: 'FortiSwitch: Loop de rede detectado em {HOST.NAME}'
-              priority: DISASTER
-              description: |
-                Loop de rede detectado! Isso causa broadcast storm e pode derrubar a rede.
-                Acao IMEDIATA:
-                  1. Identifique a porta com loop nos logs do switch
-                  2. Desative a porta: FortiSwitch > Ports > Disable port
-                  3. Investigue o dispositivo conectado (hub, switch nao gerenciado)
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
+          Possivel ataque ou perda de conectividade upstream.
 
-        # Heartbeat
-        - uuid: ed7eeb6ee29e474daa8d2d6ee31dea25
-          name: 'DDoS Guard: FortiSwitch heartbeat'
-          type: TRAP
-          key: 'ddosguard.agent.heartbeat'
-          value_type: UNSIGNED
-          history: 7d
-          description: 'Confirma que o pipeline syslog FortiSwitch -> DDoS Guard esta ativo.'
-          tags:
-            - tag: component
-              value: monitoring
-            - tag: source
-              value: fortiswitch
-          triggers:
-            - uuid: dd3faaa6334944eca81acfcfb0764f7a
-              expression: 'nodata(/DDoS Guard - FortiSwitch Security/ddosguard.agent.heartbeat,30m)=1'
-              name: 'FortiSwitch: Pipeline DDoS Guard parou em {HOST.NAME}'
-              priority: WARNING
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+      trends: 365d
+    - uuid: 0d41666869904c8f90d49cf066b76a1d
+      name: 'DDoS Guard: agent heartbeat'
+      type: TRAP
+      key: ddosguard.agent.heartbeat
+      value_type: UNSIGNED
+      history: 7d
+      description: 'Heartbeat do syslog_receiver.php — confirma que o pipeline
+
+        FortiGate → syslog → DDoS Guard esta funcionando.
+
+        '
+      tags:
+      - tag: component
+        value: monitoring
+      - tag: source
+        value: fortigate
+      triggers:
+      - uuid: 2b2b67c167734d4ea610513d9edb1137
+        expression: nodata(/DDoS Guard - FortiGate Security/ddosguard.agent.heartbeat,30m)=1
+        name: 'FortiGate: Pipeline DDoS Guard parou em {HOST.NAME}'
+        priority: WARNING
+        description: "O syslog_receiver.php nao recebe eventos do FortiGate ha mais\
+          \ de 30min.\nVerifique:\n  1. Configuracao de syslog no FortiGate\n  2.\
+          \ Servico rsyslog no appliance: systemctl status rsyslog\n  3. Porta 514\
+          \ UDP aberta no appliance\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+      delay: '0'
+      trends: 365d
+  - uuid: 95538dce94c54a1a8b0bf66b655acd02
+    template: DDoS Guard - FortiSwitch Security
+    name: DDoS Guard - FortiSwitch Security
+    description: "Template de seguranca DDoS Guard para FortiSwitch.\nDetecta via\
+      \ syslog: port security violations, MAC spoofing,\nloops de rede, autenticacao\
+      \ 802.1X falhada, DHCP snooping.\n\nCONFIGURACAO NO FORTISWITCH (gerenciado\
+      \ pelo FortiGate):\n  # Via FortiGate > WiFi & Switch Controller > Managed FortiSwitches\n\
+      \  # Em cada switch: Edit > Logging > Enable syslog\n\n  # Ou via CLI do FortiSwitch:\n\
+      \  config log syslogd setting\n    set status enable\n    set server IP_DO_APPLIANCE_ZABBIX\n\
+      \    set port 514\n  end\n\nCONFIGURACAO FORTISWITCH STANDALONE:\n  config system\
+      \ syslog\n    set server IP_DO_APPLIANCE_ZABBIX\n    set port 514\n  end\n\n\
+      Compativel com: Zabbix 7.4+ | FortiSwitchOS 7.0+\n"
+    groups:
+    - name: Templates/Network devices
+    - name: Templates/Security
+    macros:
+    - macro: '{$FSW.PORT.VIOLATIONS.WARN}'
+      value: '10'
+      description: Violacoes de port security por 5min para WARNING
+    - macro: '{$FSW.MAC.SPOOF.WARN}'
+      value: '5'
+      description: Eventos de MAC spoofing por 5min para HIGH
+    - macro: '{$FSW.DOT1X.FAIL.WARN}'
+      value: '20'
+      description: Falhas de autenticacao 802.1X por 5min para WARNING
+    items:
+    - uuid: d98800df8e2c4fba8c71605c3fb4d8bf
+      name: 'DDoS Guard: FortiSwitch security events'
+      type: TRAP
+      key: ddosguard.attack.event
+      value_type: TEXT
+      history: 7d
+      description: 'Eventos de seguranca do FortiSwitch recebidos via syslog.
+
+        Inclui: port security violation, MAC spoofing, loop detection,
+
+        802.1X failure, DHCP snooping violation.
+
+        '
+      tags:
+      - tag: component
+        value: network
+      - tag: source
+        value: fortiswitch
+      delay: '0'
+      trends: '0'
+    - uuid: 6169095d9ae14ab39d9bc2d2b449e0ca
+      name: 'DDoS Guard: FortiSwitch blocks per minute'
+      type: TRAP
+      key: ddosguard.firewall.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Taxa de bloqueios de seguranca do FortiSwitch por minuto.
+
+        '
+      tags:
+      - tag: component
+        value: network
+      - tag: source
+        value: fortiswitch
+      triggers:
+      - uuid: 3ae8fdf7f9434ba2a6cbbf2d4df22cef
+        expression: min(/DDoS Guard - FortiSwitch Security/ddosguard.firewall.rate,5m)>={$FSW.PORT.VIOLATIONS.WARN}
+        name: 'FortiSwitch: Alto volume de violacoes de seguranca em {HOST.NAME}'
+        priority: HIGH
+        description: 'O FortiSwitch esta detectando um volume elevado de violacoes
+          de seguranca.
+
+          Possivel: MAC spoofing, port security violation, DHCP starvation.
+
+          Verifique: FortiSwitch > Log > Event Log
+
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: 350b618cd64a4fcb96518cef96a03395
+      name: 'DDoS Guard: FortiSwitch port security violations'
+      type: TRAP
+      key: ddosguard.fsw.port.violations
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Numero de violacoes de port security detectadas.
+
+        Gerado quando um MAC nao autorizado tenta acessar uma porta protegida.
+
+        '
+      tags:
+      - tag: component
+        value: network
+      - tag: source
+        value: fortiswitch
+      triggers:
+      - uuid: e75f1975f7e449c4a5f2f2c085a15f8b
+        expression: sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.port.violations,5m)>={$FSW.PORT.VIOLATIONS.WARN}
+        name: 'FortiSwitch: Violacoes de port security em {HOST.NAME}'
+        priority: HIGH
+        description: 'Multiplas violacoes de port security detectadas.
+
+          Possivel dispositivo nao autorizado conectado a rede.
+
+          Identifique a porta e o MAC de origem nos logs do switch.
+
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: 7f3e586d327b41dba3dec9d62ab5a2ca
+      name: 'DDoS Guard: FortiSwitch MAC spoofing events'
+      type: TRAP
+      key: ddosguard.fsw.mac.spoof
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Eventos de MAC spoofing detectados pelo FortiSwitch.
+
+        Um MAC address aparecendo em portas diferentes simultaneamente.
+
+        '
+      tags:
+      - tag: component
+        value: network
+      - tag: source
+        value: fortiswitch
+      triggers:
+      - uuid: 54044a7fc5e543358f11c435bca18591
+        expression: sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.mac.spoof,5m)>={$FSW.MAC.SPOOF.WARN}
+        name: 'FortiSwitch: MAC Spoofing detectado em {HOST.NAME}'
+        priority: HIGH
+        description: 'Possivel ataque de MAC spoofing detectado.
+
+          Um MAC address apareceu em multiplas portas — pode ser ARP spoofing.
+
+          Acao: isolar as portas envolvidas e investigar o dispositivo.
+
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: bca539052a564224b2e01f3f90f0a176
+      name: 'DDoS Guard: FortiSwitch 802.1X auth failures'
+      type: TRAP
+      key: ddosguard.fsw.dot1x.failures
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Falhas de autenticacao 802.1X (NAC) no FortiSwitch.
+
+        Alto volume pode indicar dispositivos nao autorizados tentando acesso.
+
+        '
+      tags:
+      - tag: component
+        value: network
+      - tag: source
+        value: fortiswitch
+      triggers:
+      - uuid: 8126726262564255aee31cc2c570d67e
+        expression: sum(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.dot1x.failures,5m)>={$FSW.DOT1X.FAIL.WARN}
+        name: 'FortiSwitch: Alto volume de falhas 802.1X em {HOST.NAME}'
+        priority: WARNING
+        description: 'Multiplas falhas de autenticacao 802.1X detectadas.
+
+          Possivel tentativa de acesso com dispositivos nao registrados.
+
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: b116f10504bc41dca23c2e4227570186
+      name: 'DDoS Guard: FortiSwitch loop detected'
+      type: TRAP
+      key: ddosguard.fsw.loop.detected
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Loop de rede detectado pelo FortiSwitch (STP/RSTP ou loop guard).
+
+        Loops causam broadcast storms que degradam severamente a rede.
+
+        '
+      tags:
+      - tag: component
+        value: network
+      - tag: source
+        value: fortiswitch
+      triggers:
+      - uuid: 55edff8e12e64071a63fcd9ffdd418a9
+        expression: last(/DDoS Guard - FortiSwitch Security/ddosguard.fsw.loop.detected)>0
+        name: 'FortiSwitch: Loop de rede detectado em {HOST.NAME}'
+        priority: DISASTER
+        description: "Loop de rede detectado! Isso causa broadcast storm e pode derrubar\
+          \ a rede.\nAcao IMEDIATA:\n  1. Identifique a porta com loop nos logs do\
+          \ switch\n  2. Desative a porta: FortiSwitch > Ports > Disable port\n  3.\
+          \ Investigue o dispositivo conectado (hub, switch nao gerenciado)\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+      delay: '0'
+      trends: 365d
+    - uuid: 14c46fe809eb41e8bf1e0ed6bf91b1ff
+      name: 'DDoS Guard: FortiSwitch heartbeat'
+      type: TRAP
+      key: ddosguard.agent.heartbeat
+      value_type: UNSIGNED
+      history: 7d
+      description: Confirma que o pipeline syslog FortiSwitch -> DDoS Guard esta ativo.
+      tags:
+      - tag: component
+        value: monitoring
+      - tag: source
+        value: fortiswitch
+      triggers:
+      - uuid: 91035ab35f88488cbd6a906eb6c68444
+        expression: nodata(/DDoS Guard - FortiSwitch Security/ddosguard.agent.heartbeat,30m)=1
+        name: 'FortiSwitch: Pipeline DDoS Guard parou em {HOST.NAME}'
+        priority: WARNING
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+      delay: '0'
+      trends: 365d

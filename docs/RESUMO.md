@@ -779,3 +779,46 @@ O Sophos Central não envia syslog nativo — as opções documentadas são:
 | `suricata_receiver.php` | Suricata IDS/IPS | eve.json |
 | `syslog_forwarder.py` | Genérico (substitui omprog) | qualquer syslog |
 | `install_integrations.sh` | Todas | — |
+
+---
+
+## Fase 14 — Revisão geral v2.4 (2026-07-27)
+
+### Templates — correções sistemáticas
+
+A auditoria identificou **53 itens** em 6 templates com campos obrigatórios
+ausentes (`delay`, `history`, `trends`). O Zabbix 7.4 aceita os templates
+mas gera warnings internos e pode ignorar valores de retenção incorretos.
+
+Regra correta para itens `TRAP` (recebem dados via `zabbix_sender`):
+- `delay: '0'` — TRAP não faz polling, não precisa de intervalo
+- `history: 30d` — numéricos | `history: 7d` — texto/JSON
+- `trends: 365d` — numéricos | `trends: '0'` — texto/JSON (sem trends)
+
+### Agente — v2.4.0
+
+Quatro melhorias operacionais implementadas sem alterar a lógica de coleta:
+
+1. **Graceful shutdown** — `systemctl stop ddos-guard-agent` agora espera
+   o ciclo atual terminar antes de encerrar (sem perda de eventos)
+
+2. **Retry com backoff** — falhas de rede transitórias não perdem eventos;
+   o agente tenta 3× com espera crescente (1s → 2s → 4s)
+
+3. **Logging estruturado** — todos os logs têm nível `[INFO/WARN/ERROR]`
+   facilitando grep e análise em produção
+
+4. **Loop não-bloqueante** — `threading.Event.wait()` permite shutdown
+   imediato sem esperar o `sleep(interval)` completar
+
+### Módulos de dashboard — causa raiz resolvida
+
+Após extensa investigação (10+ horas de debugging), a causa raiz dos
+widgets em branco foi identificada: as views retornavam HTML puro,
+mas o Zabbix 7.4 exige que a resposta seja encapsulada em JSON via
+`CWidgetView`. O módulo `DDoSAttackMonitor` (que funcionava) foi usado
+como referência para identificar o padrão correto.
+
+Todos os 3 novos widgets foram reescritos seguindo o padrão correto
+e validados em produção com dados reais (149 eventos, 242 tentativas,
+brute-force SSH da Coreia do Sul detectado ao vivo).

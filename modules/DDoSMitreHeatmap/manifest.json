@@ -1,0 +1,22 @@
+{
+	"manifest_version": 2.0,
+	"id": "ddosmitre",
+	"type": "widget",
+	"name": "DDoS Guard - MITRE ATT&CK Heatmap",
+	"namespace": "DDoSMitreHeatmap",
+	"version": "2.3.0",
+	"author": "GLCTech",
+	"description": "Heatmap das táticas MITRE ATT&CK detectadas: Credential Access, Impact, Reconnaissance, Initial Access, C&C, Execution.",
+	"url": "",
+	"widget": {
+		"size": { "width": 36, "height": 5 },
+		"in": {
+			"hostids": { "type": "_hostids" },
+			"groupids": { "type": "_hostgroupids" }
+		},
+		"out": []
+	},
+	"actions": {
+		"widget.ddosmitre.view": { "class": "WidgetView" }
+	}
+}

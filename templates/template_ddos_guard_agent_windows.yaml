@@ -1,447 +1,352 @@
 zabbix_export:
   version: '7.4'
   template_groups:
-    - uuid: 7df96b18c230490a9a0a9c7bf20dbb25
-      name: 'Templates/Security'
+  - uuid: b6974d20a9c04b8aa6cbc79a989904af
+    name: Templates/Security
   templates:
-    - uuid: f5211a238c8840898a4fe9ce3a4bb22f
-      template: 'DDoS Guard - Agent Windows'
-      name: 'DDoS Guard - Agent Windows Server'
-      description: |
-        Template dedicado para Windows Servers monitorados pelo DDoS Guard.
-        Suporte completo a:
+  - uuid: d14187e335db49bcb031784911a7390c
+    template: DDoS Guard - Agent Windows
+    name: DDoS Guard - Agent Windows Server
+    description: "Template dedicado para Windows Servers monitorados pelo DDoS Guard.\n\
+      Suporte completo a:\n\nBRUTE-FORCE / ATAQUES:\n  Event ID 4625 - Logon falhado\
+      \ (RDP, SMB, NTLM, Kerberos)\n  Event ID 4771 - Falha de pre-autenticacao Kerberos\n\
+      \  Event ID 4776 - Falha de validacao NTLM\n\nWINDOWS FIREWALL (Advanced Security):\n\
+      \  Event ID 5152 - WFP bloqueou pacote de entrada\n  Event ID 5157 - WFP bloqueou\
+      \ conexao de entrada\n  Event ID 5025 - Servico do Firewall parou\n  Event ID\
+      \ 2004 - Regra adicionada (monitoramento de mudancas)\n\nWINDOWS DEFENDER:\n\
+      \  Event ID 1116 - Ameaca detectada (malware, trojan, ransomware)\n  Event ID\
+      \ 1117 - Acao tomada (quarentena, remocao, bloqueio)\n  Event ID 1119 - Remediacao\
+      \ bem-sucedida\n  Event ID 2001 - Atualizacao de definicoes falhou\n  Event\
+      \ ID 5013 - Protecao em tempo real desabilitada (CRITICO)\n\nCONFIGURACAO INICIAL\
+      \ (Windows Server):\n  # Habilitar auditoria de logon\n  auditpol /set /subcategory:\"\
+      Logon\" /failure:enable\n  auditpol /set /subcategory:\"Account Logon\" /failure:enable\n\
+      \n  # Habilitar auditoria do Windows Filtering Platform\n  auditpol /set /subcategory:\"\
+      Filtering Platform Packet Drop\" /failure:enable\n  auditpol /set /subcategory:\"\
+      Filtering Platform Connection\" /failure:enable\n\n  # Habilitar log do Firewall\
+      \ no Event Viewer\n  wevtutil sl \"Microsoft-Windows-Windows Firewall With Advanced\
+      \ Security/Firewall\" /e:true\n\n  # Verificar Windows Defender ativo\n  Get-MpComputerStatus\
+      \ | Select AntivirusEnabled,RealTimeProtectionEnabled\n\nInstalacao do agente:\n\
+      \  msiexec /i DDoSGuardAgent.msi (interativo)\n  msiexec /i DDoSGuardAgent.msi\
+      \ /qn INGEST_URL=\"...\" INGEST_TOKEN=\"...\" HOSTNAME=\"...\" (GPO/SCCM)\n\n\
+      Compativel com: Zabbix 7.4+ | Windows Server 2016/2019/2022/2025\n"
+    groups:
+    - name: Templates/Security
+    macros:
+    - macro: '{$DG.ATTACK.WARN}'
+      value: '50'
+      description: Threshold de ataques/min para trigger WARNING (brute-force RDP/SMB)
+    - macro: '{$DG.ATTACK.DISASTER}'
+      value: '200'
+      description: Threshold de ataques/min por 5min para trigger DISASTER (DDoS)
+    - macro: '{$DG.DISTINCT_IPS.DISASTER}'
+      value: '50'
+      description: Threshold de IPs distintos para trigger DISASTER (botnet)
+    - macro: '{$DG.FIREWALL.WARN}'
+      value: '500'
+      description: Threshold de bloqueios de firewall/min para trigger HIGH
+    - macro: '{$DG.AV.WARN}'
+      value: '1'
+      description: 'Qualquer deteccao do Defender dispara alerta (recomendado: 1)'
+    - macro: '{$DG.HEARTBEAT.TIMEOUT}'
+      value: 15m
+      description: Tempo sem heartbeat para considerar agente parado
+    items:
+    - uuid: 8fc7f9be5f16431bb8f0460cdc54d8c4
+      name: 'DDoS Guard: agent heartbeat'
+      type: TRAP
+      key: ddosguard.agent.heartbeat
+      value_type: UNSIGNED
+      history: 7d
+      description: "Enviado pelo agente a cada ciclo (padrao: 10s). Valor sempre 1.\n\
+        Gerenciado pelo Task Scheduler (tarefa DDoSGuardAgent).\n\nVerificar no host:\n\
+        \  Get-ScheduledTask -TaskName DDoSGuardAgent\n  Get-Content \"C:\\ProgramData\\\
+        DDoSGuard\\agent.log\" -Tail 20\n"
+      tags:
+      - tag: component
+        value: monitoring
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: 5c9612e863154511bbba480fc1f54d1c
+        expression: nodata(/DDoS Guard - Agent Windows/ddosguard.agent.heartbeat,{$DG.HEARTBEAT.TIMEOUT})=1
+        name: DDoS Guard Agent parou em {HOST.NAME}
+        priority: WARNING
+        description: "O agente nao envia heartbeat ha mais de {$DG.HEARTBEAT.TIMEOUT}.\n\
+          Verificar:\n  Get-ScheduledTask -TaskName DDoSGuardAgent | Select State\n\
+          \  schtasks /query /tn DDoSGuardAgent /fo LIST\n  Get-Content \"C:\\ProgramData\\\
+          DDoSGuard\\agent.log\" -Tail 30\nReiniciar:\n  Start-ScheduledTask -TaskName\
+          \ DDoSGuardAgent\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+      delay: '0'
+      trends: 365d
+    - uuid: 617a2a172add4747b077cb7d519fae25
+      name: 'DDoS Guard: attacks per minute (counter)'
+      type: TRAP
+      key: ddosguard.attacks.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: "Tentativas de ataque detectadas no ultimo intervalo (60s).\nFontes\
+        \ no Windows Server:\n  Event ID 4625: logon falhado (RDP, SMB, NTLM)\n  Event\
+        \ ID 4771: falha Kerberos (Logon Type 3)\n  Event ID 4776: falha validacao\
+        \ NTLM\n\nRequisitos:\n  auditpol /set /subcategory:\"Logon\" /failure:enable\n\
+        \  auditpol /set /subcategory:\"Account Logon\" /failure:enable\n\nInvestigar:\n\
+        \  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents\
+        \ 20 |\n    Select TimeCreated,@{n='IP';e={$_.Properties[19].Value}},\n  \
+        \         @{n='User';e={$_.Properties[5].Value}}\n"
+      tags:
+      - tag: component
+        value: ddos
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: 5871da74ca6645fc86979355e8990cd7
+        expression: min(/DDoS Guard - Agent Windows/ddosguard.attacks.rate,2m)>={$DG.ATTACK.WARN}
+        name: Pico de tentativas RDP/SMB em {HOST.NAME} (>={$DG.ATTACK.WARN}/min)
+        priority: HIGH
+        description: "Volume anormal de logons falhados (Event ID 4625).\nPossivel\
+          \ brute-force RDP ou SMB em andamento.\n\nInvestigar:\n  Get-WinEvent -FilterHashtable\
+          \ @{LogName='Security';Id=4625} -MaxEvents 50\nBloquear IP no Windows Firewall:\n\
+          \  New-NetFirewallRule -DisplayName \"Block attacker\" -Direction Inbound\n\
+          \    -RemoteAddress \"IP_DO_ATACANTE\" -Action Block\nHabilitar NLA no RDP\
+          \ (recomendado):\n  Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\\
+          Control\\Terminal Server\\WinStations\\RDP-Tcp'\n    -Name 'UserAuthentication'\
+          \ -Value 1\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      - uuid: a72e58d64ecb40dba7baba6687eb501e
+        expression: min(/DDoS Guard - Agent Windows/ddosguard.attacks.rate,5m)>={$DG.ATTACK.DISASTER}
+        name: Ataque DDoS em andamento em {HOST.NAME} (>={$DG.ATTACK.DISASTER}/min
+          por 5min)
+        priority: DISASTER
+        description: "Volume sustentado muito acima do normal.\nPadrao de ataque DDoS\
+          \ ou varredura massiva (RDP, SMB, LDAP).\n\nAcoes imediatas:\n  1. Isolar\
+          \ o host da rede externa se possivel\n  2. Acionar bloqueio upstream (ACL\
+          \ no roteador/firewall perimetral)\n  3. Verificar o dashboard DDoS Guard\
+          \ para identificar origens\n  4. Considerar desabilitar RDP temporariamente:\n\
+          \     Stop-Service -Name TermService -Force\n"
+        manual_close: 'YES'
+        dependencies:
+        - name: Pico de tentativas RDP/SMB em {HOST.NAME} (>={$DG.ATTACK.WARN}/min)
+          expression: min(/DDoS Guard - Agent Windows/ddosguard.attacks.rate,2m)>={$DG.ATTACK.WARN}
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: b5a425c2b09649d7b8094f673f5b00c1
+      name: 'DDoS Guard: distinct source IPs (last 5 min)'
+      type: TRAP
+      key: ddosguard.distinct_ips.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Numero de IPs de origem distintos nos ultimos 5 minutos.
 
-        BRUTE-FORCE / ATAQUES:
-          Event ID 4625 - Logon falhado (RDP, SMB, NTLM, Kerberos)
-          Event ID 4771 - Falha de pre-autenticacao Kerberos
-          Event ID 4776 - Falha de validacao NTLM
+        Pico subito indica ataque DDoS distribuido (botnet).
 
-        WINDOWS FIREWALL (Advanced Security):
-          Event ID 5152 - WFP bloqueou pacote de entrada
-          Event ID 5157 - WFP bloqueou conexao de entrada
-          Event ID 5025 - Servico do Firewall parou
-          Event ID 2004 - Regra adicionada (monitoramento de mudancas)
+        '
+      tags:
+      - tag: component
+        value: ddos
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: 6101b8714e7b43c5b0039b72959afb83
+        expression: min(/DDoS Guard - Agent Windows/ddosguard.distinct_ips.rate,5m)>={$DG.DISTINCT_IPS.DISASTER}
+        name: Ataque distribuido em {HOST.NAME} — multiplas origens (>={$DG.DISTINCT_IPS.DISASTER}
+          IPs)
+        priority: DISASTER
+        description: 'Grande numero de IPs distintos atacando simultaneamente.
 
-        WINDOWS DEFENDER:
-          Event ID 1116 - Ameaca detectada (malware, trojan, ransomware)
-          Event ID 1117 - Acao tomada (quarentena, remocao, bloqueio)
-          Event ID 1119 - Remediacao bem-sucedida
-          Event ID 2001 - Atualizacao de definicoes falhou
-          Event ID 5013 - Protecao em tempo real desabilitada (CRITICO)
+          Padrao caracteristico de botnet / DDoS distribuido.
 
-        CONFIGURACAO INICIAL (Windows Server):
-          # Habilitar auditoria de logon
-          auditpol /set /subcategory:"Logon" /failure:enable
-          auditpol /set /subcategory:"Account Logon" /failure:enable
+          Acionar mitigacao upstream ou scrubbing center.
 
-          # Habilitar auditoria do Windows Filtering Platform
-          auditpol /set /subcategory:"Filtering Platform Packet Drop" /failure:enable
-          auditpol /set /subcategory:"Filtering Platform Connection" /failure:enable
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: 623370464bf0460bb08d2c959f8280d5
+      name: 'DDoS Guard: firewall blocks per minute (counter)'
+      type: TRAP
+      key: ddosguard.firewall.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: "Bloqueios detectados pelo Windows Firewall no ultimo intervalo.\n\
+        Fontes:\n  Event ID 5152: WFP bloqueou pacote de entrada\n  Event ID 5157:\
+        \ WFP bloqueou conexao de entrada\n  Canal: Microsoft-Windows-Windows Firewall\
+        \ With Advanced Security/Firewall\n\nHabilitar auditoria:\n  auditpol /set\
+        \ /subcategory:\"Filtering Platform Packet Drop\" /failure:enable\n  auditpol\
+        \ /set /subcategory:\"Filtering Platform Connection\" /failure:enable\n  wevtutil\
+        \ sl \"Microsoft-Windows-Windows Firewall With Advanced Security/Firewall\"\
+        \ /e:true\n\nInvestigar:\n  Get-WinEvent -LogName \"Microsoft-Windows-Windows\
+        \ Firewall With Advanced Security/Firewall\" |\n    Where-Object { $_.Id -in\
+        \ @(5152,5157) } | Select-Object -First 20\n"
+      tags:
+      - tag: component
+        value: firewall
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: 5a68ef762fa44c46bd5d4e72084e964b
+        expression: min(/DDoS Guard - Agent Windows/ddosguard.firewall.rate,10m)>={$DG.FIREWALL.WARN}
+        name: Volume alto de bloqueios de firewall em {HOST.NAME} (>={$DG.FIREWALL.WARN}/min)
+        priority: HIGH
+        description: "Windows Firewall bloqueando volume anormal de conexoes.\nVerificar:\n\
+          \  Get-WinEvent -LogName \"Security\" |\n    Where-Object {$_.Id -in @(5152,5157)}\
+          \ | Select-Object -First 20\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: 8f755a5cda9546cebd77da62cc594b05
+      name: 'DDoS Guard: antivirus blocks per minute (counter)'
+      type: TRAP
+      key: ddosguard.antivirus.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: "Deteccoes do Windows Defender no ultimo intervalo (60s).\nFontes:\n\
+        \  Event ID 1116: ameaca detectada (malware, trojan, ransomware, exploit)\n\
+        \  Event ID 1117: acao tomada (quarentena, remocao, bloqueio de acesso)\n\
+        \  Event ID 1119: remediacao bem-sucedida\n  Canal: Microsoft-Windows-Windows\
+        \ Defender/Operational\n\nInvestigar deteccoes recentes:\n  Get-MpThreatDetection\
+        \ | Select-Object -First 10 |\n    Format-List ThreatName,ActionSuccess,DetectionSourceTypeID,ProcessName\n\
+        \nVerificar quarentena:\n  Get-MpThreat | Select-Object ThreatName,IsActive,Resources\n\
+        \nVarredura completa manual:\n  Start-MpScan -ScanType FullScan\n\nAtualizar\
+        \ definicoes:\n  Update-MpSignature\n"
+      tags:
+      - tag: component
+        value: antivirus
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: ca84c0475bbf469fadbe197dee81de81
+        expression: min(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,10m)>={$DG.AV.WARN}
+        name: Windows Defender detectou ameaca em {HOST.NAME}
+        priority: HIGH
+        description: "O Windows Defender detectou e agiu sobre uma ameaca no servidor.\n\
+          Em servidores, qualquer deteccao deve ser investigada imediatamente.\n\n\
+          Investigar:\n  Get-MpThreatDetection | Select-Object -First 5 | Format-List\n\
+          \  Get-WinEvent -LogName \"Microsoft-Windows-Windows Defender/Operational\"\
+          \ |\n    Where-Object { $_.Id -in @(1116,1117) } | Select-Object -First\
+          \ 10\n\nSe confirmado, isolar o host:\n  1. Bloquear acesso de rede se possivel\n\
+          \  2. Fazer varredura completa: Start-MpScan -ScanType FullScan\n  3. Verificar\
+          \ item \"raw block event - antivirus\" para nome do malware\n  4. Acionar\
+          \ equipe de resposta a incidentes se necessario\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      delay: '0'
+      trends: 365d
+    - uuid: 1f93b8f61d2e459f945a12a61d93963b
+      name: 'DDoS Guard: Windows Defender status'
+      type: ZABBIX_ACTIVE
+      key: wmi.getall[root/Microsoft/Windows/Defender,SELECT AMRunningMode FROM MSFT_MpComputerStatus]
+      value_type: TEXT
+      delay: 5m
+      history: 7d
+      description: "Monitora o estado do Windows Defender via WMI.\nAMRunningMode:\n\
+        \  0 = Normal (ativo)\n  1 = Passive mode (outro AV principal)\n  2 = SxS\
+        \ Passive Mode\n  4 = EDR Block mode\n  5 = Not running (CRITICO)\nRequer:\
+        \ Zabbix Agent ativo no host (nao apenas o DDoS Guard agent).\n"
+      tags:
+      - tag: component
+        value: antivirus
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: zabbix-agent
+      triggers:
+      - uuid: b3ca55e791224687b0f5a2f472c4413e
+        expression: 'find(/DDoS Guard - Agent Windows/wmi.getall[root/Microsoft/Windows/Defender,SELECT
+          AMRunningMode FROM MSFT_MpComputerStatus],,"like","AMRunningMode = 5")=1
 
-          # Habilitar log do Firewall no Event Viewer
-          wevtutil sl "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall" /e:true
-
-          # Verificar Windows Defender ativo
-          Get-MpComputerStatus | Select AntivirusEnabled,RealTimeProtectionEnabled
-
-        Instalacao do agente:
-          msiexec /i DDoSGuardAgent.msi (interativo)
-          msiexec /i DDoSGuardAgent.msi /qn INGEST_URL="..." INGEST_TOKEN="..." HOSTNAME="..." (GPO/SCCM)
-
-        Compativel com: Zabbix 7.4+ | Windows Server 2016/2019/2022/2025
-      groups:
-        - name: 'Templates/Security'
-
-      # ----------------------------------------------------------------
-      # MACROS — ajuste os thresholds sem editar o template
-      # ----------------------------------------------------------------
-      macros:
-        - macro: '{$DG.ATTACK.WARN}'
-          value: '50'
-          description: 'Threshold de ataques/min para trigger WARNING (brute-force RDP/SMB)'
-        - macro: '{$DG.ATTACK.DISASTER}'
-          value: '200'
-          description: 'Threshold de ataques/min por 5min para trigger DISASTER (DDoS)'
-        - macro: '{$DG.DISTINCT_IPS.DISASTER}'
-          value: '50'
-          description: 'Threshold de IPs distintos para trigger DISASTER (botnet)'
-        - macro: '{$DG.FIREWALL.WARN}'
-          value: '500'
-          description: 'Threshold de bloqueios de firewall/min para trigger HIGH'
-        - macro: '{$DG.AV.WARN}'
-          value: '1'
-          description: 'Qualquer deteccao do Defender dispara alerta (recomendado: 1)'
-        - macro: '{$DG.HEARTBEAT.TIMEOUT}'
-          value: '15m'
-          description: 'Tempo sem heartbeat para considerar agente parado'
-
-      items:
-
-        # ----------------------------------------------------------------
-        # Heartbeat
-        # ----------------------------------------------------------------
-        - uuid: abe9e1f8e7ae4da9866b12746e51b9c0
-          name: 'DDoS Guard: agent heartbeat'
-          type: TRAP
-          key: 'ddosguard.agent.heartbeat'
-          value_type: UNSIGNED
-          history: 7d
-          description: |
-            Enviado pelo agente a cada ciclo (padrao: 10s). Valor sempre 1.
-            Gerenciado pelo Task Scheduler (tarefa DDoSGuardAgent).
-
-            Verificar no host:
-              Get-ScheduledTask -TaskName DDoSGuardAgent
-              Get-Content "C:\ProgramData\DDoSGuard\agent.log" -Tail 20
-          tags:
-            - tag: component
-              value: monitoring
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: e5bbedb946764cb2a3876b4404232eb4
-              expression: 'nodata(/DDoS Guard - Agent Windows/ddosguard.agent.heartbeat,{$DG.HEARTBEAT.TIMEOUT})=1'
-              name: 'DDoS Guard Agent parou em {HOST.NAME}'
-              priority: WARNING
-              description: |
-                O agente nao envia heartbeat ha mais de {$DG.HEARTBEAT.TIMEOUT}.
-                Verificar:
-                  Get-ScheduledTask -TaskName DDoSGuardAgent | Select State
-                  schtasks /query /tn DDoSGuardAgent /fo LIST
-                  Get-Content "C:\ProgramData\DDoSGuard\agent.log" -Tail 30
-                Reiniciar:
-                  Start-ScheduledTask -TaskName DDoSGuardAgent
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
-
-        # ----------------------------------------------------------------
-        # Ataques — brute-force RDP/SMB/Kerberos (4625/4771/4776)
-        # ----------------------------------------------------------------
-        - uuid: 0fd962b013cb44b995030bdba874edde
-          name: 'DDoS Guard: attacks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.attacks.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Tentativas de ataque detectadas no ultimo intervalo (60s).
-            Fontes no Windows Server:
-              Event ID 4625: logon falhado (RDP, SMB, NTLM)
-              Event ID 4771: falha Kerberos (Logon Type 3)
-              Event ID 4776: falha validacao NTLM
-
-            Requisitos:
-              auditpol /set /subcategory:"Logon" /failure:enable
-              auditpol /set /subcategory:"Account Logon" /failure:enable
-
-            Investigar:
-              Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 20 |
-                Select TimeCreated,@{n='IP';e={$_.Properties[19].Value}},
-                       @{n='User';e={$_.Properties[5].Value}}
-          tags:
-            - tag: component
-              value: ddos
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: 539e04a206d74e278a5ea9bc8a358496
-              expression: 'min(/DDoS Guard - Agent Windows/ddosguard.attacks.rate,2m)>={$DG.ATTACK.WARN}'
-              name: 'Pico de tentativas RDP/SMB em {HOST.NAME} (>={$DG.ATTACK.WARN}/min)'
-              priority: HIGH
-              description: |
-                Volume anormal de logons falhados (Event ID 4625).
-                Possivel brute-force RDP ou SMB em andamento.
-
-                Investigar:
-                  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 50
-                Bloquear IP no Windows Firewall:
-                  New-NetFirewallRule -DisplayName "Block attacker" -Direction Inbound
-                    -RemoteAddress "IP_DO_ATACANTE" -Action Block
-                Habilitar NLA no RDP (recomendado):
-                  Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
-                    -Name 'UserAuthentication' -Value 1
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
-            - uuid: c72b7691c668449b8db95f09751cbd56
-              expression: 'min(/DDoS Guard - Agent Windows/ddosguard.attacks.rate,5m)>={$DG.ATTACK.DISASTER}'
-              name: 'Ataque DDoS em andamento em {HOST.NAME} (>={$DG.ATTACK.DISASTER}/min por 5min)'
-              priority: DISASTER
-              description: |
-                Volume sustentado muito acima do normal.
-                Padrao de ataque DDoS ou varredura massiva (RDP, SMB, LDAP).
-
-                Acoes imediatas:
-                  1. Isolar o host da rede externa se possivel
-                  2. Acionar bloqueio upstream (ACL no roteador/firewall perimetral)
-                  3. Verificar o dashboard DDoS Guard para identificar origens
-                  4. Considerar desabilitar RDP temporariamente:
-                     Stop-Service -Name TermService -Force
-              manual_close: 'YES'
-              dependencies:
-                - name: 'Pico de tentativas RDP/SMB em {HOST.NAME} (>={$DG.ATTACK.WARN}/min)'
-                  expression: 'min(/DDoS Guard - Agent Windows/ddosguard.attacks.rate,2m)>={$DG.ATTACK.WARN}'
-              tags:
-                - tag: scope
-                  value: security
-
-        # ----------------------------------------------------------------
-        # IPs distintos — botnet
-        # ----------------------------------------------------------------
-        - uuid: bb44270b2eb64c5a8909902789de9dc8
-          name: 'DDoS Guard: distinct source IPs (last 5 min)'
-          type: TRAP
-          key: 'ddosguard.distinct_ips.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Numero de IPs de origem distintos nos ultimos 5 minutos.
-            Pico subito indica ataque DDoS distribuido (botnet).
-          tags:
-            - tag: component
-              value: ddos
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: 36ba88cf1c2f48439e2326a636aa9de6
-              expression: 'min(/DDoS Guard - Agent Windows/ddosguard.distinct_ips.rate,5m)>={$DG.DISTINCT_IPS.DISASTER}'
-              name: 'Ataque distribuido em {HOST.NAME} — multiplas origens (>={$DG.DISTINCT_IPS.DISASTER} IPs)'
-              priority: DISASTER
-              description: |
-                Grande numero de IPs distintos atacando simultaneamente.
-                Padrao caracteristico de botnet / DDoS distribuido.
-                Acionar mitigacao upstream ou scrubbing center.
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
-
-        # ----------------------------------------------------------------
-        # Windows Firewall — WFP (5152/5157)
-        # ----------------------------------------------------------------
-        - uuid: 19c70fcd32af4c0aafa227de6cd70d62
-          name: 'DDoS Guard: firewall blocks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.firewall.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Bloqueios detectados pelo Windows Firewall no ultimo intervalo.
-            Fontes:
-              Event ID 5152: WFP bloqueou pacote de entrada
-              Event ID 5157: WFP bloqueou conexao de entrada
-              Canal: Microsoft-Windows-Windows Firewall With Advanced Security/Firewall
-
-            Habilitar auditoria:
-              auditpol /set /subcategory:"Filtering Platform Packet Drop" /failure:enable
-              auditpol /set /subcategory:"Filtering Platform Connection" /failure:enable
-              wevtutil sl "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall" /e:true
-
-            Investigar:
-              Get-WinEvent -LogName "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall" |
-                Where-Object { $_.Id -in @(5152,5157) } | Select-Object -First 20
-          tags:
-            - tag: component
-              value: firewall
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: c73cb576857b47e5a0c92614d6f4a98c
-              expression: 'min(/DDoS Guard - Agent Windows/ddosguard.firewall.rate,10m)>={$DG.FIREWALL.WARN}'
-              name: 'Volume alto de bloqueios de firewall em {HOST.NAME} (>={$DG.FIREWALL.WARN}/min)'
-              priority: HIGH
-              description: |
-                Windows Firewall bloqueando volume anormal de conexoes.
-                Verificar:
-                  Get-WinEvent -LogName "Security" |
-                    Where-Object {$_.Id -in @(5152,5157)} | Select-Object -First 20
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
-
-        # ----------------------------------------------------------------
-        # Windows Defender — 1116/1117/5013
-        # ----------------------------------------------------------------
-        - uuid: 6b3f2f98b1174fbcabd27a7b82238a7b
-          name: 'DDoS Guard: antivirus blocks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.antivirus.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Deteccoes do Windows Defender no ultimo intervalo (60s).
-            Fontes:
-              Event ID 1116: ameaca detectada (malware, trojan, ransomware, exploit)
-              Event ID 1117: acao tomada (quarentena, remocao, bloqueio de acesso)
-              Event ID 1119: remediacao bem-sucedida
-              Canal: Microsoft-Windows-Windows Defender/Operational
-
-            Investigar deteccoes recentes:
-              Get-MpThreatDetection | Select-Object -First 10 |
-                Format-List ThreatName,ActionSuccess,DetectionSourceTypeID,ProcessName
-
-            Verificar quarentena:
-              Get-MpThreat | Select-Object ThreatName,IsActive,Resources
-
-            Varredura completa manual:
-              Start-MpScan -ScanType FullScan
-
-            Atualizar definicoes:
-              Update-MpSignature
-          tags:
-            - tag: component
-              value: antivirus
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: 71bb96f68851479f87d6af6bcbae5e8a
-              expression: 'min(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,10m)>={$DG.AV.WARN}'
-              name: 'Windows Defender detectou ameaca em {HOST.NAME}'
-              priority: HIGH
-              description: |
-                O Windows Defender detectou e agiu sobre uma ameaca no servidor.
-                Em servidores, qualquer deteccao deve ser investigada imediatamente.
-
-                Investigar:
-                  Get-MpThreatDetection | Select-Object -First 5 | Format-List
-                  Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" |
-                    Where-Object { $_.Id -in @(1116,1117) } | Select-Object -First 10
-
-                Se confirmado, isolar o host:
-                  1. Bloquear acesso de rede se possivel
-                  2. Fazer varredura completa: Start-MpScan -ScanType FullScan
-                  3. Verificar item "raw block event - antivirus" para nome do malware
-                  4. Acionar equipe de resposta a incidentes se necessario
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
-
-        # ----------------------------------------------------------------
-        # Defender desabilitado — critico em servidores
-        # ----------------------------------------------------------------
-        - uuid: 91a6531642814f6ababdfca470f7061b
-          name: 'DDoS Guard: Windows Defender status'
-          type: ZABBIX_ACTIVE
-          key: 'wmi.getall[root/Microsoft/Windows/Defender,SELECT AMRunningMode FROM MSFT_MpComputerStatus]'
-          value_type: TEXT
-          delay: 5m
-          history: 7d
-          description: |
-            Monitora o estado do Windows Defender via WMI.
-            AMRunningMode:
-              0 = Normal (ativo)
-              1 = Passive mode (outro AV principal)
-              2 = SxS Passive Mode
-              4 = EDR Block mode
-              5 = Not running (CRITICO)
-            Requer: Zabbix Agent ativo no host (nao apenas o DDoS Guard agent).
-          tags:
-            - tag: component
-              value: antivirus
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: zabbix-agent
-          triggers:
-            - uuid: 18a27704b1314ebbaae066bf8775ecb5
-              expression: |
-                find(/DDoS Guard - Agent Windows/wmi.getall[root/Microsoft/Windows/Defender,SELECT AMRunningMode FROM MSFT_MpComputerStatus],,"like","AMRunningMode = 5")=1
-              name: 'Windows Defender DESABILITADO em {HOST.NAME}'
-              priority: DISASTER
-              description: |
-                O Windows Defender esta desabilitado no servidor.
-                Em ambientes de servidor, isso representa risco de seguranca critico.
-
-                Reabilitar:
-                  Set-MpPreference -DisableRealtimeMonitoring $false
-                  Start-Service WinDefend
-
-                Verificar politica de grupo:
-                  gpresult /h C:\gpo_report.html
-                  # Procure por "Turn off Windows Defender Antivirus"
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
-
-        # ----------------------------------------------------------------
-        # Raw events JSON
-        # ----------------------------------------------------------------
-        - uuid: 2b2d80f673eb4c89b0e2e1907870efcf
-          name: 'DDoS Guard: raw attack event (JSON)'
-          type: TRAP
-          key: 'ddosguard.attack.event'
-          value_type: TEXT
-          history: 7d
-          description: |
-            JSON completo de cada ataque detectado.
-            Windows Server: principalmente BRUTE_FORCE_RDP (Event ID 4625).
-
-            Campos: src_ip, country, city, asn, attack_type,
-                    attempts, target_port, protocol, blocked, timestamp
-          tags:
-            - tag: component
-              value: ddos
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: ddosguard-agent
-
-        - uuid: 79f63db15da04301802e03f20710a45b
-          name: 'DDoS Guard: raw block event - firewall (JSON)'
-          type: TRAP
-          key: 'ddosguard.block.firewall'
-          value_type: TEXT
-          history: 7d
-          description: |
-            JSON de cada bloqueio do Windows Firewall / WFP.
-            Event ID 5152 (pacote) / 5157 (conexao).
-
-            Campos: src_ip, country, tool, rule,
-                    target_port, protocol, reason, timestamp
-          tags:
-            - tag: component
-              value: firewall
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: ddosguard-agent
-
-        - uuid: 3d573f5e93f84956b92143978e28213c
-          name: 'DDoS Guard: raw block event - antivirus (JSON)'
-          type: TRAP
-          key: 'ddosguard.block.antivirus'
-          value_type: TEXT
-          history: 7d
-          description: |
-            JSON de cada deteccao do Windows Defender.
-            Event ID 1116 (deteccao) / 1117 (acao tomada).
-
-            Campos: src_ip, tool (windows_defender),
-                    malware (nome da ameaca), action, file, timestamp
-
-            Exemplo:
-            {"tool":"windows_defender","malware":"Trojan:Win32/Emotet.A",
-            "action":"quarantined","file":"C:\\Users\\Admin\\invoice.exe"}
-          tags:
-            - tag: component
-              value: antivirus
-            - tag: os
-              value: windows-server
-            - tag: source
-              value: ddosguard-agent
+          '
+        name: Windows Defender DESABILITADO em {HOST.NAME}
+        priority: DISASTER
+        description: "O Windows Defender esta desabilitado no servidor.\nEm ambientes\
+          \ de servidor, isso representa risco de seguranca critico.\n\nReabilitar:\n\
+          \  Set-MpPreference -DisableRealtimeMonitoring $false\n  Start-Service WinDefend\n\
+          \nVerificar politica de grupo:\n  gpresult /h C:\\gpo_report.html\n  # Procure\
+          \ por \"Turn off Windows Defender Antivirus\"\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      trends: '0'
+    - uuid: f09375e4417649db841421355c11465e
+      name: 'DDoS Guard: raw attack event (JSON)'
+      type: TRAP
+      key: ddosguard.attack.event
+      value_type: TEXT
+      history: 7d
+      description: "JSON completo de cada ataque detectado.\nWindows Server: principalmente\
+        \ BRUTE_FORCE_RDP (Event ID 4625).\n\nCampos: src_ip, country, city, asn,\
+        \ attack_type,\n        attempts, target_port, protocol, blocked, timestamp\n"
+      tags:
+      - tag: component
+        value: ddos
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: ddosguard-agent
+      delay: '0'
+      trends: '0'
+    - uuid: 07cbd02e4ee64923bfe080ae8cd40233
+      name: 'DDoS Guard: raw block event - firewall (JSON)'
+      type: TRAP
+      key: ddosguard.block.firewall
+      value_type: TEXT
+      history: 7d
+      description: "JSON de cada bloqueio do Windows Firewall / WFP.\nEvent ID 5152\
+        \ (pacote) / 5157 (conexao).\n\nCampos: src_ip, country, tool, rule,\n   \
+        \     target_port, protocol, reason, timestamp\n"
+      tags:
+      - tag: component
+        value: firewall
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: ddosguard-agent
+      delay: '0'
+      trends: '0'
+    - uuid: 6079ccf37dcb4caeb935c0249382188e
+      name: 'DDoS Guard: raw block event - antivirus (JSON)'
+      type: TRAP
+      key: ddosguard.block.antivirus
+      value_type: TEXT
+      history: 7d
+      description: "JSON de cada deteccao do Windows Defender.\nEvent ID 1116 (deteccao)\
+        \ / 1117 (acao tomada).\n\nCampos: src_ip, tool (windows_defender),\n    \
+        \    malware (nome da ameaca), action, file, timestamp\n\nExemplo:\n{\"tool\"\
+        :\"windows_defender\",\"malware\":\"Trojan:Win32/Emotet.A\",\n\"action\":\"\
+        quarantined\",\"file\":\"C:\\\\Users\\\\Admin\\\\invoice.exe\"}\n"
+      tags:
+      - tag: component
+        value: antivirus
+      - tag: os
+        value: windows-server
+      - tag: source
+        value: ddosguard-agent
+      delay: '0'
+      trends: '0'

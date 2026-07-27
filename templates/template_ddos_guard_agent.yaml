@@ -1,263 +1,279 @@
 zabbix_export:
   version: '7.4'
   template_groups:
-    - uuid: 7df96b18c230490a9a0a9c7bf20dbb25
-      name: 'Templates/Security'
+  - uuid: 20db31e5e51343cb8b8d9fdc78f034e3
+    name: Templates/Security
   templates:
-    - uuid: 6de95f8b5ce9434dbb9c63c1e792dfa5
-      template: 'DDoS Guard - Agent'
-      name: 'DDoS Guard - Agent'
-      description: |
-        Template leve para associar em CADA HOST monitorado pelo DDoS Guard.
-        Contém apenas os itens trapper que o agente coletor (ddos_guard_agent.py)
-        envia via zabbix_sender, mais as triggers essenciais de alerta por host.
+  - uuid: 61d5a6b1ffdc47caa3899e0571206580
+    template: DDoS Guard - Agent
+    name: DDoS Guard - Agent
+    description: "Template leve para associar em CADA HOST monitorado pelo DDoS Guard.\n\
+      Contém apenas os itens trapper que o agente coletor (ddos_guard_agent.py)\n\
+      envia via zabbix_sender, mais as triggers essenciais de alerta por host.\n\n\
+      NÃO inclui dashboard — o dashboard fica no template principal\n\"DDoS Guard\
+      \ - Security Monitoring\" associado ao servidor/appliance.\n\nInstalação:\n\
+      \  1. Importe este arquivo em Administration > Templates\n  2. Associe \"DDoS\
+      \ Guard - Agent\" em cada host Linux ou Windows\n     que tem o ddos_guard_agent.py\
+      \ instalado\n  3. O template principal \"DDoS Guard - Security Monitoring\"\
+      \ fica\n     associado APENAS no host que roda o servidor Zabbix/appliance\n\
+      \nCompatível com Zabbix 7.4+\nAgente: ddos_guard_agent.py (Linux e Windows)\n"
+    groups:
+    - name: Templates/Security
+    items:
+    - uuid: fc05ee02f0d74bd8b0f63ec2e9010b0d
+      name: 'DDoS Guard: agent heartbeat'
+      type: TRAP
+      key: ddosguard.agent.heartbeat
+      value_type: UNSIGNED
+      history: 7d
+      description: 'Enviado pelo agente a cada ciclo (padrão: 10s).
 
-        NÃO inclui dashboard — o dashboard fica no template principal
-        "DDoS Guard - Security Monitoring" associado ao servidor/appliance.
+        Valor sempre 1. Usado para detectar se o agente parou.
 
-        Instalação:
-          1. Importe este arquivo em Administration > Templates
-          2. Associe "DDoS Guard - Agent" em cada host Linux ou Windows
-             que tem o ddos_guard_agent.py instalado
-          3. O template principal "DDoS Guard - Security Monitoring" fica
-             associado APENAS no host que roda o servidor Zabbix/appliance
+        '
+      tags:
+      - tag: component
+        value: monitoring
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: f75c75bfcd58480886a4174191c9f883
+        expression: nodata(/DDoS Guard - Agent/ddosguard.agent.heartbeat,15m)=1
+        name: DDoS Guard Agent parou em {HOST.NAME}
+        priority: WARNING
+        description: "O agente coletor não envia heartbeat há mais de 15 minutos.\n\
+          Verifique o serviço ddos-guard-agent no host monitorado:\n  Linux:   systemctl\
+          \ status ddos-guard-agent\n  Windows: Get-Service DDoSGuardAgent\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+        - tag: component
+          value: monitoring
+      delay: '0'
+      trends: 365d
+    - uuid: 22bd3dca51f1431a89aab960c9dc6e14
+      name: 'DDoS Guard: attacks per minute (counter)'
+      type: TRAP
+      key: ddosguard.attacks.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Número de tentativas de ataque detectadas no último intervalo
 
-        Compatível com Zabbix 7.4+
-        Agente: ddos_guard_agent.py (Linux e Windows)
-      groups:
-        - name: 'Templates/Security'
-      items:
+        de agregação (padrão: 60s). Enviado pelo agente via zabbix_sender.
 
-        # ------------------------------------------------------------------
-        # Heartbeat — agente vivo
-        # ------------------------------------------------------------------
-        - uuid: 5db6fb0a3da8495fa187281fe5368a46
-          name: 'DDoS Guard: agent heartbeat'
-          type: TRAP
-          key: 'ddosguard.agent.heartbeat'
-          value_type: UNSIGNED
-          history: 7d
-          description: |
-            Enviado pelo agente a cada ciclo (padrão: 10s).
-            Valor sempre 1. Usado para detectar se o agente parou.
-          tags:
-            - tag: component
-              value: monitoring
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: 276f4256538a4fc485a8099af938360e
-              expression: 'nodata(/DDoS Guard - Agent/ddosguard.agent.heartbeat,15m)=1'
-              name: 'DDoS Guard Agent parou em {HOST.NAME}'
-              priority: WARNING
-              description: |
-                O agente coletor não envia heartbeat há mais de 15 minutos.
-                Verifique o serviço ddos-guard-agent no host monitorado:
-                  Linux:   systemctl status ddos-guard-agent
-                  Windows: Get-Service DDoSGuardAgent
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
-                - tag: component
-                  value: monitoring
+        '
+      tags:
+      - tag: component
+        value: ddos
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: 949eb69c4f49420fad45a221254c25f3
+        expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>=50
+        name: Pico de ataques em {HOST.NAME} (>= 50/min)
+        priority: HIGH
+        description: 'Aumento anormal no número de tentativas de ataque detectadas
 
-        # ------------------------------------------------------------------
-        # Contadores de ataques
-        # ------------------------------------------------------------------
-        - uuid: 43c3eee7c891458bbcb189725969b86e
-          name: 'DDoS Guard: attacks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.attacks.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Número de tentativas de ataque detectadas no último intervalo
-            de agregação (padrão: 60s). Enviado pelo agente via zabbix_sender.
-          tags:
-            - tag: component
-              value: ddos
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: 059b6218084c4b6394a1afc9d2603f9d
-              expression: 'min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>=50'
-              name: 'Pico de ataques em {HOST.NAME} (>= 50/min)'
-              priority: HIGH
-              description: |
-                Aumento anormal no número de tentativas de ataque detectadas
-                pelo agente. Pode ser brute-force, scan ou estágio inicial de DDoS.
-                Verifique o dashboard "DDoS Guard - Security Operations Center".
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
-                - tag: component
-                  value: ddos
-            - uuid: c04d91b02ce5460983bf49f2150faded
-              expression: 'min(/DDoS Guard - Agent/ddosguard.attacks.rate,5m)>=200'
-              name: 'Possível ataque DDoS em {HOST.NAME} (>= 200/min por 5min)'
-              priority: DISASTER
-              description: |
-                Volume sustentado de tentativas de ataque muito acima do normal.
-                Padrão consistente com ataque DDoS ou varredura massiva.
-                Ação imediata recomendada — verifique o painel de ataques.
-              manual_close: 'YES'
-              dependencies:
-                - name: 'Pico de ataques em {HOST.NAME} (>= 50/min)'
-                  expression: 'min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>=50'
-              tags:
-                - tag: scope
-                  value: availability
-                - tag: component
-                  value: ddos
+          pelo agente. Pode ser brute-force, scan ou estágio inicial de DDoS.
 
-        # ------------------------------------------------------------------
-        # IPs distintos — detecta DDoS distribuído
-        # ------------------------------------------------------------------
-        - uuid: 1ceaf489b55744a3a9eef515a7a00023
-          name: 'DDoS Guard: distinct source IPs (last 5 min)'
-          type: TRAP
-          key: 'ddosguard.distinct_ips.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Número de IPs de origem distintos observados nos últimos 5 minutos.
-            Pico súbito indica ataque DDoS distribuído (botnet).
-          tags:
-            - tag: component
-              value: ddos
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: e464539ae6584c848f129a172928afe2
-              expression: 'min(/DDoS Guard - Agent/ddosguard.distinct_ips.rate,5m)>=50'
-              name: 'Ataque distribuído em {HOST.NAME} — muitas origens distintas (>= 50 IPs)'
-              priority: DISASTER
-              description: |
-                Grande número de IPs distintos atacando simultaneamente é
-                característico de ataque DDoS distribuído (botnet).
-                Considere acionar mitigação upstream (scrubbing center / ACL no ISP).
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: availability
-                - tag: component
-                  value: ddos
+          Verifique o dashboard "DDoS Guard - Security Operations Center".
 
-        # ------------------------------------------------------------------
-        # Bloqueios de firewall
-        # ------------------------------------------------------------------
-        - uuid: f41b94f92ca54f3285a4888e54771197
-          name: 'DDoS Guard: firewall blocks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.firewall.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Número de bloqueios de firewall no último intervalo de agregação.
-            Fontes: iptables DROP, UFW BLOCK, fail2ban BAN, nftables.
-          tags:
-            - tag: component
-              value: firewall
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: 51a8ef3bb919474b98befe6e550f5045
-              expression: 'min(/DDoS Guard - Agent/ddosguard.firewall.rate,10m)>=500'
-              name: 'Volume alto de bloqueios de firewall em {HOST.NAME} (>= 500/min)'
-              priority: HIGH
-              description: |
-                O firewall está bloqueando um volume anormalmente alto de conexões.
-                Pode indicar ataque em andamento sendo contido pelo firewall.
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
-                - tag: component
-                  value: firewall
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+        - tag: component
+          value: ddos
+      - uuid: 434e14339a654f728cd86c746fe3677e
+        expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,5m)>=200
+        name: Possível ataque DDoS em {HOST.NAME} (>= 200/min por 5min)
+        priority: DISASTER
+        description: 'Volume sustentado de tentativas de ataque muito acima do normal.
 
-        # ------------------------------------------------------------------
-        # Bloqueios de antivírus
-        # ------------------------------------------------------------------
-        - uuid: 269c99795a624ee0830506381ad2337a
-          name: 'DDoS Guard: antivirus blocks per minute (counter)'
-          type: TRAP
-          key: 'ddosguard.antivirus.rate'
-          value_type: UNSIGNED
-          history: 30d
-          description: |
-            Número de detecções/bloqueios do antivírus no último intervalo.
-            Fontes: ClamAV (clamd.log), Windows Defender (Event ID 1116/1117).
-          tags:
-            - tag: component
-              value: antivirus
-            - tag: source
-              value: ddosguard-agent
-          triggers:
-            - uuid: 9244986e2c334681960e4e5aaea0ae3d
-              expression: 'min(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>=5'
-              name: 'Múltiplas detecções de malware em {HOST.NAME}'
-              priority: HIGH
-              description: |
-                O antivírus detectou múltiplas ameaças em curto período.
-                Verifique o host imediatamente — possível infecção ativa ou
-                tentativa de intrusão via arquivo malicioso.
-              manual_close: 'YES'
-              tags:
-                - tag: scope
-                  value: security
-                - tag: component
-                  value: antivirus
+          Padrão consistente com ataque DDoS ou varredura massiva.
 
-        # ------------------------------------------------------------------
-        # Eventos raw JSON — recebidos pelo ingest.php e repassados
-        # ------------------------------------------------------------------
-        - uuid: eee58a609884451cbdef44afda8cda58
-          name: 'DDoS Guard: raw attack event (JSON)'
-          type: TRAP
-          key: 'ddosguard.attack.event'
-          value_type: TEXT
-          history: 7d
-          description: |
-            Evento JSON completo de cada ataque detectado pelo agente.
-            Consumido pelos widgets do dashboard para exibir detalhes do ataque.
-            Formato: {"src_ip":"x.x.x.x","country":"BR","attack_type":"SYN_FLOOD",
-            "attempts":150,"target_port":80,"protocol":"TCP","blocked":true,...}
-          tags:
-            - tag: component
-              value: ddos
-            - tag: source
-              value: ddosguard-agent
+          Ação imediata recomendada — verifique o painel de ataques.
 
-        - uuid: 61d00bedf2424daf8b0836d8d3fb5c8e
-          name: 'DDoS Guard: raw block event - firewall (JSON)'
-          type: TRAP
-          key: 'ddosguard.block.firewall'
-          value_type: TEXT
-          history: 7d
-          description: |
-            Evento JSON de cada bloqueio de firewall.
-            Formato: {"src_ip":"x.x.x.x","country":"RU","tool":"iptables",
-            "rule":"INPUT DROP","target_port":22,"protocol":"TCP",...}
-          tags:
-            - tag: component
-              value: firewall
-            - tag: source
-              value: ddosguard-agent
+          '
+        manual_close: 'YES'
+        dependencies:
+        - name: Pico de ataques em {HOST.NAME} (>= 50/min)
+          expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>=50
+        tags:
+        - tag: scope
+          value: availability
+        - tag: component
+          value: ddos
+      delay: '0'
+      trends: 365d
+    - uuid: 64931273162e4af7bd8eabf2845545fb
+      name: 'DDoS Guard: distinct source IPs (last 5 min)'
+      type: TRAP
+      key: ddosguard.distinct_ips.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Número de IPs de origem distintos observados nos últimos 5 minutos.
 
-        - uuid: 509f55e6bc9c4781b33cdbf061bea6e8
-          name: 'DDoS Guard: raw block event - antivirus (JSON)'
-          type: TRAP
-          key: 'ddosguard.block.antivirus'
-          value_type: TEXT
-          history: 7d
-          description: |
-            Evento JSON de cada detecção do antivírus.
-            Formato: {"src_ip":"127.0.0.1","tool":"clamav",
-            "malware":"Eicar-Signature","action":"quarantined","file":"/tmp/x",...}
-          tags:
-            - tag: component
-              value: antivirus
-            - tag: source
-              value: ddosguard-agent
+        Pico súbito indica ataque DDoS distribuído (botnet).
+
+        '
+      tags:
+      - tag: component
+        value: ddos
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: 027af34b95d54618a0a422dc8a90d722
+        expression: min(/DDoS Guard - Agent/ddosguard.distinct_ips.rate,5m)>=50
+        name: Ataque distribuído em {HOST.NAME} — muitas origens distintas (>= 50
+          IPs)
+        priority: DISASTER
+        description: 'Grande número de IPs distintos atacando simultaneamente é
+
+          característico de ataque DDoS distribuído (botnet).
+
+          Considere acionar mitigação upstream (scrubbing center / ACL no ISP).
+
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: availability
+        - tag: component
+          value: ddos
+      delay: '0'
+      trends: 365d
+    - uuid: f84d9cc42a8041f3bf5e4af38fcb692a
+      name: 'DDoS Guard: firewall blocks per minute (counter)'
+      type: TRAP
+      key: ddosguard.firewall.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Número de bloqueios de firewall no último intervalo de agregação.
+
+        Fontes: iptables DROP, UFW BLOCK, fail2ban BAN, nftables.
+
+        '
+      tags:
+      - tag: component
+        value: firewall
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: e10fc4abd14c471186f82f68556b1c64
+        expression: min(/DDoS Guard - Agent/ddosguard.firewall.rate,10m)>=500
+        name: Volume alto de bloqueios de firewall em {HOST.NAME} (>= 500/min)
+        priority: HIGH
+        description: 'O firewall está bloqueando um volume anormalmente alto de conexões.
+
+          Pode indicar ataque em andamento sendo contido pelo firewall.
+
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+        - tag: component
+          value: firewall
+      delay: '0'
+      trends: 365d
+    - uuid: c9e5de0ed7df4a1097b67e9a85c1f92d
+      name: 'DDoS Guard: antivirus blocks per minute (counter)'
+      type: TRAP
+      key: ddosguard.antivirus.rate
+      value_type: UNSIGNED
+      history: 30d
+      description: 'Número de detecções/bloqueios do antivírus no último intervalo.
+
+        Fontes: ClamAV (clamd.log), Windows Defender (Event ID 1116/1117).
+
+        '
+      tags:
+      - tag: component
+        value: antivirus
+      - tag: source
+        value: ddosguard-agent
+      triggers:
+      - uuid: cb5a87217f684d0cac48b88871ae6d34
+        expression: min(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>=5
+        name: Múltiplas detecções de malware em {HOST.NAME}
+        priority: HIGH
+        description: 'O antivírus detectou múltiplas ameaças em curto período.
+
+          Verifique o host imediatamente — possível infecção ativa ou
+
+          tentativa de intrusão via arquivo malicioso.
+
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+        - tag: component
+          value: antivirus
+      delay: '0'
+      trends: 365d
+    - uuid: 3bd484b8ec6749e996026063807bbc06
+      name: 'DDoS Guard: raw attack event (JSON)'
+      type: TRAP
+      key: ddosguard.attack.event
+      value_type: TEXT
+      history: 7d
+      description: 'Evento JSON completo de cada ataque detectado pelo agente.
+
+        Consumido pelos widgets do dashboard para exibir detalhes do ataque.
+
+        Formato: {"src_ip":"x.x.x.x","country":"BR","attack_type":"SYN_FLOOD",
+
+        "attempts":150,"target_port":80,"protocol":"TCP","blocked":true,...}
+
+        '
+      tags:
+      - tag: component
+        value: ddos
+      - tag: source
+        value: ddosguard-agent
+      delay: '0'
+      trends: '0'
+    - uuid: 69bfde43fbe14a599243edb8ee92f319
+      name: 'DDoS Guard: raw block event - firewall (JSON)'
+      type: TRAP
+      key: ddosguard.block.firewall
+      value_type: TEXT
+      history: 7d
+      description: 'Evento JSON de cada bloqueio de firewall.
+
+        Formato: {"src_ip":"x.x.x.x","country":"RU","tool":"iptables",
+
+        "rule":"INPUT DROP","target_port":22,"protocol":"TCP",...}
+
+        '
+      tags:
+      - tag: component
+        value: firewall
+      - tag: source
+        value: ddosguard-agent
+      delay: '0'
+      trends: '0'
+    - uuid: aecf462b08f14b818c598cf20f0761e4
+      name: 'DDoS Guard: raw block event - antivirus (JSON)'
+      type: TRAP
+      key: ddosguard.block.antivirus
+      value_type: TEXT
+      history: 7d
+      description: 'Evento JSON de cada detecção do antivírus.
+
+        Formato: {"src_ip":"127.0.0.1","tool":"clamav",
+
+        "malware":"Eicar-Signature","action":"quarantined","file":"/tmp/x",...}
+
+        '
+      tags:
+      - tag: component
+        value: antivirus
+      - tag: source
+        value: ddosguard-agent
+      delay: '0'
+      trends: '0'

@@ -51,6 +51,8 @@ import re
 import socket
 import subprocess
 import sys
+import signal
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -813,6 +815,20 @@ def load_config(path):
     return parser
 
 
+
+# ─────────────────────────────────────────────────────────────────────
+VERSION = "2.4.0"
+_shutdown_event = threading.Event()
+
+def _handle_signal(signum, frame):
+    """Graceful shutdown via SIGTERM / SIGINT."""
+    log(f"[INFO] Sinal {signum} recebido — encerrando graciosamente...")
+    _shutdown_event.set()
+
+signal.signal(signal.SIGTERM, _handle_signal)
+signal.signal(signal.SIGINT,  _handle_signal)
+# ─────────────────────────────────────────────────────────────────────
+
 def main():
     default_config_path = (
         r"C:\ProgramData\DDoSGuard\agent.conf" if IS_WINDOWS
@@ -833,17 +849,23 @@ def main():
     agent = DDoSGuardAgent(cfg)
     interval = int(cfg["general"]["poll_interval"])
 
-    log(f"DDoS Guard Agent iniciado ({platform.system()}).")
+    log(f"DDoS Guard Agent v{VERSION} iniciado ({platform.system()}) "
+        f"| host={cfg['general']['zbx_host']} "
+        f"| interval={interval}s")
+
     if args.once:
         agent.poll_once()
         return
 
-    while True:
+    while not _shutdown_event.is_set():
         try:
             agent.poll_once()
         except Exception as e:
-            log(f"Erro no ciclo de coleta: {e}")
-        time.sleep(interval)
+            log(f"[ERROR] Ciclo de coleta: {e}")
+        # Usa evento para shutdown imediato (sem esperar o sleep inteiro)
+        _shutdown_event.wait(timeout=interval)
+
+    log("[INFO] DDoS Guard Agent encerrado.")
 
 
 if __name__ == "__main__":
