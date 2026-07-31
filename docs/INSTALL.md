@@ -167,11 +167,45 @@ No Zabbix: **Administration → General → Modules** → clique em **Scan direc
 
 ### 8. Montar o dashboard geral
 
+#### Autenticação
+
+O script precisa de credencial de API. Duas opções:
+
 ```bash
+# Usuário e senha — mais simples para uso pontual
 python3 scripts/provision_dashboard.py \
   --url http://SEU_IP/zabbix \
   --user Admin --password sua_senha
+
+# API token — preferível em automação
+python3 scripts/provision_dashboard.py \
+  --url http://SEU_IP/zabbix \
+  --token 9f8a3c1b2e4d...
 ```
+
+Para gerar o token: **Users → API tokens → Create API token**. Escolha o
+usuário, defina (ou não) validade, e copie o valor — **ele só é exibido
+uma vez**.
+
+> **Cuidado com placeholders.** Passar `--token TOKEN` ou
+> `--token SEU_API_TOKEN` faz o Zabbix responder
+> `Invalid params. / Session terminated, re-login, please.` — mensagem
+> que sugere sessão expirada, não credencial errada. O script detecta os
+> placeholders mais comuns e avisa antes de chamar a API.
+
+Sobre a `--url`: use o endereço do **frontend**, incluindo o caminho, se
+houver. Num appliance padrão costuma ser `http://IP/zabbix`; em instalação
+via Docker com porta publicada, algo como `http://IP:8080`. O script
+acrescenta `/api_jsonrpc.php` sozinho.
+
+Para conferir o layout sem tocar na API, `--dry-run` não exige
+credencial nenhuma:
+
+```bash
+python3 scripts/provision_dashboard.py --url http://SEU_IP/zabbix --dry-run
+```
+
+#### O que é criado
 
 Cria o dashboard **DDoS Guard - Security Operations Center** em duas
 páginas: *SOC* (visão geral, bloqueios, timeline, MITRE, incidentes) e
@@ -181,12 +215,12 @@ Antes de criar, o script verifica via `module.get` se os módulos estão
 instalados **e** habilitados — sem essa checagem o `dashboard.create`
 falha com um erro pouco informativo.
 
+Se já existir um dashboard com o mesmo nome, o script para e avisa. Use
+`--force` para apagar e recriar, ou `--name` para escolher outro nome.
+
 **Escolher quais painéis entram:**
 
 ```bash
-# Ver o layout sem criar nada
-python3 scripts/provision_dashboard.py --url ... --token ... --dry-run
-
 # Presets
 --preset full       # padrão: 5 painéis + Problems, 2 páginas
 --preset mikrotik   # só SOC Overview + Block Monitor + Problems

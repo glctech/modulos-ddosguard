@@ -205,6 +205,26 @@ Nenhum módulo foi removido: os cinco leem tabelas diferentes e são
 complementares. O que decide se um painel fica vazio é qual integração
 alimenta cada tabela.
 
+**Tratamento de erros de API.** Uma credencial inválida produzia 15
+linhas de traceback, e o `checar_modulos()` capturava *qualquer* exceção
+— inclusive a de autenticação — imprimindo "não foi possível verificar
+os módulos" e seguindo adiante, o que mascarava a causa raiz.
+
+- Exceção dedicada `ZabbixAuthError`, com mensagem explicando como gerar
+  um token e como usar `--user`/`--password`. Sai com `rc=2`.
+- `checar_modulos()` deixa erros de autenticação passarem em vez de
+  engoli-los.
+- Detecção dos placeholders comuns (`TOKEN`, `SEU_API_TOKEN`,
+  `CHANGE_ME`) antes de chamar a API. O Zabbix responde a um token
+  inválido com `Session terminated, re-login, please.`, que sugere sessão
+  expirada e não credencial errada.
+- A checagem de placeholder roda **depois** do `--dry-run`: conferir o
+  layout não exige credencial.
+
+Os exemplos da documentação usavam `--token TOKEN` literalmente, o que
+levava exatamente a esse erro. Substituídos por valores claramente
+ilustrativos e por `--user`/`--password`.
+
 ---
 
 ### 5. Arquivos novos

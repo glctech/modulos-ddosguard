@@ -441,6 +441,98 @@ filtro de descoberta descrito em [ITEMS.md](../zabbix/ITEMS.md).
 
 ---
 
+## Dashboard: erros do `provision_dashboard.py`
+
+### `Session terminated, re-login, please.`
+
+```
+RuntimeError: Erro da API Zabbix em dashboard.get: {'code': -32602,
+  'message': 'Invalid params.', 'data': 'Session terminated, re-login, please.'}
+```
+
+A mensagem sugere sessão expirada, mas na prática significa **credencial
+inválida**. A causa mais comum é passar o placeholder da documentação:
+
+```bash
+python3 provision_dashboard.py --url ... --token TOKEN    # ← literal
+```
+
+Gere um token real em **Users → API tokens → Create API token** — o valor
+só aparece uma vez, na criação. Ou autentique com usuário e senha:
+
+```bash
+--user Admin --password SUA_SENHA
+```
+
+Se o token era válido e parou de funcionar, verifique se ele tem data de
+expiração e se o usuário associado continua ativo e com permissão de
+criar dashboards.
+
+### `não foi possível verificar os módulos`
+
+O script tenta `module.get` antes de criar o dashboard. Quando a chamada
+falha por motivo que **não** seja autenticação, ele apenas avisa e segue
+— a verificação é conveniência, não requisito.
+
+Se a mensagem aparecer junto de um erro de autenticação logo depois, a
+causa é a credencial, não os módulos.
+
+Para pular a verificação:
+
+```bash
+--skip-module-check
+```
+
+### `[FALTA] módulo 'X' não está instalado`
+
+O widget existe no dashboard mas o módulo não foi publicado no frontend:
+
+```bash
+bash scripts/install_modules.sh
+```
+
+E habilite em **Administration → General → Modules**. Módulo instalado
+mas desabilitado aparece como `[OFF]`.
+
+### Widget aparece vazio no dashboard
+
+Antes de investigar coleta, confirme qual tabela o widget lê:
+
+| Widget | Tabela | Alimentado por |
+|---|---|---|
+| SOC Overview | `blocks` + `attacks` + `correlations` | tudo |
+| Block Monitor | `blocks` | tudo |
+| Attack Monitor | `attacks` + `host_status` | agente, Suricata, Wazuh, Sophos |
+| Response Timeline | `attacks` | idem |
+| MITRE Heatmap | `attacks` | idem |
+
+O `syslog_receiver.php` emite sempre `event_type=block_firewall`, então
+numa instalação **só com MikroTik** a tabela `ddosguard_attacks` nunca é
+populada e os três últimos ficam permanentemente vazios. Isso não é
+falha de coleta — use `--preset mikrotik`.
+
+### `Já existe um dashboard com esse nome`
+
+```bash
+--force          # apaga e recria
+--name "Outro"   # cria em paralelo
+```
+
+### Conferir o layout antes de criar
+
+`--dry-run` imprime o JSON que seria enviado e **não exige credencial**:
+
+```bash
+python3 provision_dashboard.py --url http://IP/zabbix --dry-run
+```
+
+Útil também para conferir se a `--url` está certa: use o endereço do
+frontend com o caminho, se houver (`http://IP/zabbix` num appliance
+padrão, `http://IP:8080` num Docker com porta publicada). O script
+acrescenta `/api_jsonrpc.php` sozinho.
+
+---
+
 ## A lição que sustenta tudo isso
 
 Cinco falhas independentes, nenhuma gerando erro visível, sistema
