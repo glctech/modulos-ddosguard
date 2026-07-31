@@ -39,15 +39,26 @@ para detectar, em tempo real, ataques DDoS / força bruta / malware.
   `scripts/provision_dashboard.py`:
 
 ```bash
-# Todos os widgets (2 páginas)
-python3 scripts/provision_dashboard.py --url https://zabbix.local --token TOKEN
+# Ver o layout antes de criar (não precisa de credencial)
+python3 scripts/provision_dashboard.py --url https://zabbix.local --dry-run
+
+# Criar — autenticando com usuário e senha
+python3 scripts/provision_dashboard.py --url https://zabbix.local \
+  --user Admin --password SUA_SENHA
+
+# ...ou com API token (Users → API tokens → Create API token)
+python3 scripts/provision_dashboard.py --url https://zabbix.local \
+  --token 9f8a3c1b...
 
 # Só o que uma instalação MikroTik-via-syslog realmente alimenta
-python3 scripts/provision_dashboard.py --url ... --token ... --preset mikrotik
-
-# Ver o layout antes de criar
-python3 scripts/provision_dashboard.py --url ... --token ... --dry-run
+python3 scripts/provision_dashboard.py --url ... --user Admin --password ... \
+  --preset mikrotik
 ```
+
+O token precisa ser o valor real gerado pelo Zabbix — ele só aparece uma
+vez, na criação. Um placeholder produz
+`Session terminated, re-login, please`, que não sugere a causa; o script
+detecta os placeholders mais comuns e avisa antes de chamar a API.
 
 Os widgets leem tabelas diferentes, então nenhum é redundante — mas três
 deles (`attackmonitor`, `timeline`, `mitre`) dependem de
