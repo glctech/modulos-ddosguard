@@ -148,21 +148,85 @@ if [ "$INSTALL_SYSLOG" -eq 1 ]; then
     echo ""
     echo "==> Configurando receiver syslog (pfSense / FortiGate)..."
 
+    # Conflito de imudp/ruleset derruba o bloco em SILENCIO: o rsyslog
+    # loga o erro, ignora o bloco e continua rodando. Detecta antes.
+    CONFLITOS=$(grep -rl 'imudp\|ruleset(name="ddosguard")' /etc/rsyslog.d/ 2>/dev/null \
+        | grep -v 'ddosguard-syslog.conf' || true)
+    if [ -n "$CONFLITOS" ]; then
+        warn "Outros arquivos em /etc/rsyslog.d/ declaram imudp ou o ruleset ddosguard:"
+        echo "$CONFLITOS" | sed 's/^/       /'
+        warn "Mova-os para fora de /etc/rsyslog.d/ antes de prosseguir."
+    fi
+
+    mkdir -p /var/log/mikrotik
+
     cat > /etc/rsyslog.d/ddosguard-syslog.conf << EOF
-# DDoS Guard - Receiver syslog para pfSense e FortiGate
+# DDoS Guard - Receiver syslog (pfSense, FortiGate, MikroTik)
+# Gerado por install_integrations.sh
+
 module(load="imudp")
+module(load="omprog")
+
+# CRITICO: o omprog EXIGE que a mensagem termine em \\n. Templates
+# nativos como RSYSLOG_TraditionalForwardFormat nao incluem a quebra de
+# linha, e o rsyslog rejeita 100% das mensagens com:
+#   "messages must be terminated with \\n at end of message"
+template(name="DGProgFmt" type="string"
+  string="%TIMESTAMP% %FROMHOST-IP% %syslogtag%%msg%\\n")
+
+template(name="DGFileFmt" type="string"
+  string="%TIMESTAMP:::date-rfc3339% %FROMHOST-IP% %syslogseverity-text% %msg%\\n")
+
 input(type="imudp" port="514" ruleset="ddosguard")
 
 ruleset(name="ddosguard") {
     action(type="omprog"
+        name="ddosguard_php"
         binary="/usr/bin/php ${DDOSGUARD_DIR}/integrations/syslog_receiver.php"
-        template="RSYSLOG_TraditionalForwardFormat"
+        template="DGProgFmt"
+        output="/var/log/ddosguard-omprog.log"
+        queue.type="linkedList"
         queue.size="10000"
-        queue.type="linkedList")
+        queue.discardMark="9000"
+        action.resumeRetryCount="-1")
+
+    action(type="omfile"
+        file="/var/log/ddosguard-syslog.log"
+        template="DGFileFmt"
+        queue.type="linkedList"
+        queue.size="10000")
+
+    stop
 }
 EOF
-    systemctl restart rsyslog 2>/dev/null && ok "rsyslog configurado (porta UDP 514)." || \
-        warn "Reinicie o rsyslog manualmente: systemctl restart rsyslog"
+
+    # Valida ANTES de reiniciar: erro de sintaxe derruba o servico inteiro
+    if rsyslogd -N1 >/dev/null 2>&1; then
+        systemctl restart rsyslog 2>/dev/null && ok "rsyslog configurado (porta UDP 514)." || \
+            warn "Reinicie o rsyslog manualmente: systemctl restart rsyslog"
+    else
+        err "rsyslogd -N1 acusou erro. Config NAO aplicada. Rode: rsyslogd -N1"
+    fi
+
+    cat > /etc/logrotate.d/ddosguard << 'LOGROT'
+/var/log/mikrotik/*.log
+/var/log/ddosguard-syslog.log
+/var/log/ddosguard-omprog.log
+{
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 root adm
+    sharedscripts
+    postrotate
+        systemctl kill -s HUP rsyslog.service >/dev/null 2>&1 || true
+    endscript
+}
+LOGROT
+    ok "logrotate configurado (/etc/logrotate.d/ddosguard)"
 
     echo ""
     info "Configuração pfSense:"
@@ -176,6 +240,9 @@ EOF
     info "    set server $(hostname -I | awk '{print $1}')"
     info "    set port 514"
     info "  end"
+    echo ""
+    info "Configuração MikroTik: importe mikrotik/ddosguard-ccr.rsc"
+    info "  (ajuste as variáveis do topo do arquivo antes)"
 fi
 
 # ----------------------------------------------------------------

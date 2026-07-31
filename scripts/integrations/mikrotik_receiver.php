@@ -49,6 +49,11 @@
  *   logs do MikroTik em arquivo e use um script Python para processar.
  */
 
+// Declara que o ingest.php deve se comportar como biblioteca: sem isso o
+// require abaixo executa o endpoint HTTP e encerra o processo com
+// "invalid token" antes de qualquer linha ser processada.
+define('DG_INGEST_LIB', true);
+
 require_once dirname(__DIR__) . '/ingest.php';
 require_once dirname(__DIR__) . '/correlator.php';
 
@@ -64,10 +69,14 @@ if ($is_http) {
     }
     $lines = [file_get_contents('php://input')];
 } else {
-    $lines = [];
-    while (($line = fgets(STDIN)) !== false) {
-        $lines[] = trim($line);
-    }
+    // Generator, nao array: sob omprog o processo e persistente e o pipe
+    // do stdin nunca fecha, entao fgets() nunca retorna false e o foreach
+    // abaixo jamais era alcancado. Ver docs/TROUBLESHOOTING.md.
+    $lines = (function () {
+        while (($line = fgets(STDIN)) !== false) {
+            yield trim($line);
+        }
+    })();
 }
 
 $processed = 0;

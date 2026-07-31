@@ -45,6 +45,11 @@
  *   Adicione um output HTTP no filebeat.yml apontando para este endpoint.
  */
 
+// Declara que o ingest.php deve se comportar como biblioteca: sem isso o
+// require abaixo executa o endpoint HTTP e encerra o processo com
+// "invalid token" antes de qualquer linha ser processada.
+define('DG_INGEST_LIB', true);
+
 require_once dirname(__DIR__) . '/ingest.php';
 require_once dirname(__DIR__) . '/correlator.php';
 

@@ -33,6 +33,11 @@
  *   Configure o Wazuh para enviar syslog e use syslog_parser.php
  */
 
+// Declara que o ingest.php deve se comportar como biblioteca: sem isso o
+// require abaixo executa o endpoint HTTP e encerra o processo com
+// "invalid token" antes de qualquer linha ser processada.
+define('DG_INGEST_LIB', true);
+
 require_once dirname(__DIR__) . '/ingest.php';   // carrega helpers (db_connect, respond, etc)
 
 // Valida token

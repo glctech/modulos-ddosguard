@@ -1,0 +1,18 @@
+# DDoS Guard - rotacao dos logs de syslog
+# Destino: /etc/logrotate.d/ddosguard
+/var/log/mikrotik/*.log
+/var/log/ddosguard-syslog.log
+/var/log/ddosguard-omprog.log
+{
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 root adm
+    sharedscripts
+    postrotate
+        systemctl kill -s HUP rsyslog.service >/dev/null 2>&1 || true
+    endscript
+}

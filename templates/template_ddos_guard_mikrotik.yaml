@@ -70,7 +70,7 @@ zabbix_export:
       type: CALCULATED
       key: ddosguard.mtk.cpu.util
       delay: 1m
-      params: last(//system.cpu.util[,idle])
+      params: avg(last_foreach(//system.cpu.util[*]))
       value_type: FLOAT
       units: '%'
       history: 30d

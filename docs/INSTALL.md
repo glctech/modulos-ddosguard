@@ -173,6 +173,51 @@ python3 scripts/provision_dashboard.py \
   --user Admin --password sua_senha
 ```
 
+Cria o dashboard **DDoS Guard - Security Operations Center** em duas
+páginas: *SOC* (visão geral, bloqueios, timeline, MITRE, incidentes) e
+*Ataques*.
+
+Antes de criar, o script verifica via `module.get` se os módulos estão
+instalados **e** habilitados — sem essa checagem o `dashboard.create`
+falha com um erro pouco informativo.
+
+**Escolher quais painéis entram:**
+
+```bash
+# Ver o layout sem criar nada
+python3 scripts/provision_dashboard.py --url ... --token ... --dry-run
+
+# Presets
+--preset full       # padrão: 5 painéis + Problems, 2 páginas
+--preset mikrotik   # só SOC Overview + Block Monitor + Problems
+--preset minimal    # Block Monitor + Problems
+
+# Seleção manual
+--widgets socoverview,blockmonitor,timeline
+--exclude mitre,attackmonitor
+```
+
+Widgets omitidos não deixam buraco: as posições são recalculadas.
+
+**Qual preset usar.** Os cinco painéis leem tabelas diferentes e são
+complementares — nenhum é redundante. Mas três deles dependem de
+`ddosguard_attacks`:
+
+| Painel | Tabela | Alimentado por |
+|---|---|---|
+| SOC Overview | `blocks` + `attacks` + `correlations` | tudo |
+| Block Monitor | `blocks` | tudo |
+| Attack Monitor | `attacks` + `host_status` | agente, Suricata, Wazuh, Sophos |
+| Response Timeline | `attacks` | idem |
+| MITRE Heatmap | `attacks` | idem |
+
+O `syslog_receiver.php` emite sempre `event_type=block_firewall`, então
+numa instalação **só com MikroTik** a tabela `attacks` nunca é populada e
+esses três ficam permanentemente vazios. Use `--preset mikrotik`.
+
+Se você também tem agentes Linux/Windows, Suricata ou Wazuh, use o
+preset `full` — eles alimentam `attacks` normalmente.
+
 ---
 
 ## Parte 2 — Agente nos hosts monitorados
@@ -359,6 +404,225 @@ Stop-ScheduledTask   -TaskName DDoSGuardAgent
 # Ver log em tempo real
 Get-Content "C:\ProgramData\DDoSGuard\agent.log" -Wait -Tail 20
 ```
+
+---
+
+## Parte 4 — MikroTik RouterOS (6.x / 7.x)
+
+Diferente dos hosts com agente, o MikroTik não roda coletor: ele envia os
+eventos de firewall por syslog, e o coletor classifica cada um pelo
+`log-prefix` da regra que capturou o pacote.
+
+```
+MikroTik ──syslog UDP 514──► rsyslog ──omprog──► syslog_receiver.php
+                                                        │
+                                          ┌─────────────┴─────────────┐
+                                          ▼                           ▼
+                                  ddosguard_blocks             zabbix_sender
+```
+
+Faça na ordem. Cada etapa tem uma verificação — não avance sem ela, ou
+você acaba depurando várias camadas ao mesmo tempo.
+
+### 1. Envio de syslog
+
+```
+/system logging action
+add name=syslogremoto target=remote remote=<IP_DO_COLETOR> remote-port=514 \
+    bsd-syslog=yes syslog-facility=local7 syslog-severity=auto
+
+/system logging
+add topics=firewall action=syslogremoto
+add topics=info     action=syslogremoto
+```
+
+> **O erro mais comum:** apontar o `remote` para o IP público do próprio
+> roteador. Parece razoável, já que é o IP pelo qual você acessa tudo.
+> Mas pacotes gerados pelo próprio router saem pelo chain `output` e
+> **não passam pelo `dstnat`** — o port-forward nunca se aplica e o log
+> morre no equipamento. Se o coletor está atrás de NAT, use o **IP
+> interno** dele:
+>
+> ```
+> /ip firewall nat print where dst-port=<porta_web_do_zabbix>
+> ```
+>
+> O campo `to-addresses` é o IP que vai na action.
+
+Os outros três campos importam mais do que parece:
+
+| Campo | Use | Se errado |
+|---|---|---|
+| `syslog-facility` | `local7` | `syslog` (5) se mistura ao log do próprio daemon |
+| `syslog-severity` | `auto` | Fixo carimba tudo igual e destrói o filtro por severidade |
+| `bsd-syslog` | `yes` | Sem RFC 3164 o rsyslog parseia nos campos errados |
+
+**Verificação** — no coletor:
+
+```bash
+timeout 10 tcpdump -n -i any udp port 514
+```
+
+Precisa aparecer `SYSLOG local7.*`. Anote o **IP de origem**: ele pode
+ser diferente do IP que você usa para administrar o CCR, e é esse que vai
+no filtro do rsyslog.
+
+Se não aparecer nada, pare aqui — é roteamento, e nada adiante vai
+funcionar.
+
+### 2. Heartbeat
+
+Configure **antes** das regras de detecção. Ele é o que diferencia
+"nenhum evento" de "pipeline morto":
+
+```
+/system scheduler
+add name=ddosguard-heartbeat interval=1m \
+    on-event=":log info \"DDOSGUARD-HEARTBEAT alive\""
+```
+
+### 3. Receiver no coletor
+
+```bash
+bash scripts/integrations/install_integrations.sh --syslog
+```
+
+O instalador detecta arquivos conflitantes em `/etc/rsyslog.d/`, valida
+com `rsyslogd -N1` antes de reiniciar e configura o logrotate.
+
+> Só **um** arquivo em `/etc/rsyslog.d/` pode carregar `imudp` e definir
+> o ruleset `ddosguard`. Havendo dois, o rsyslog registra o erro,
+> **ignora o bloco e continua rodando** — a config quebrada não derruba o
+> serviço, o que torna a falha invisível.
+
+**Verificação:**
+
+```bash
+ss -lunp | grep :514
+journalctl -u rsyslog -n 20 --no-pager | grep -i omprog   # deve estar limpo
+tail -3 /var/log/ddosguard-syslog.log
+```
+
+### 4. Identificar o host no Zabbix
+
+```bash
+mysql -N -e "SELECT hostid, host FROM hosts \
+  WHERE name LIKE '%CCR%' AND status IN (0,1);" <BANCO>
+```
+
+Acrescente a `/etc/zabbix/ddosguard/ingest.config.php`:
+
+```php
+'DG_MIKROTIK_ZBX_HOST'   => 'MIKROTIK CCR 1009',
+'DG_MIKROTIK_ZBX_HOSTID' => 10780,
+```
+
+Use o nome **técnico** (`hosts.host`), não o visível. O `zabbix_sender`
+compara byte a byte e rejeita em silêncio se houver diferença de espaço
+ou acento.
+
+**Verificação** — com uma linha real do log:
+
+```bash
+echo 'Jul 31 06:47:49 45.70.216.69 CCR DDOSGUARD-PORTSCAN input: in:sfp1 out:(unknown 0), proto TCP (SYN), 203.0.113.9:44123->45.70.216.68:22, len 40' \
+  | php /usr/share/zabbix/ui/ddosguard/integrations/syslog_receiver.php
+
+mysql -e "SELECT block_id, src_ip, reason FROM ddosguard_blocks \
+  ORDER BY 1 DESC LIMIT 2;" <BANCO>
+```
+
+### 5. Regras de detecção
+
+Ajuste as variáveis do topo de `mikrotik/ddosguard-ccr.rsc` e importe:
+
+```
+/import file-name=ddosguard-ccr.rsc
+```
+
+> **Crie a whitelist antes das regras de detecção.** Um `nmap` de teste a
+> partir do próprio Zabbix coloca o coletor na lista de bloqueio e
+> derruba **todo** o monitoramento, inclusive SNMP. Teste sempre de um IP
+> externo.
+
+A ordem no chain `input` é crítica:
+
+```
+0  accept established,related    ← sem isso, tráfego de RESPOSTA
+                                   (Google, Cloudflare) entra como "new"
+1  accept whitelist              ← protege coletor e admin
+2+ detecção
+```
+
+**Verificação** — de um IP externo (4G do celular):
+
+```bash
+nmap -sS -p 1-100 <IP_PUBLICO_CCR>
+```
+
+No CCR:
+
+```
+/ip firewall address-list print where list="DDOSGUARD-PORTSCAN"
+/ip firewall filter print stats where log=yes
+```
+
+### 6. Volume
+
+```
+/ip firewall filter set [find action=drop chain=forward log=yes] log=no
+```
+
+Logar todo pacote dropado de cliente PPPoE gera dezenas de mensagens por
+**segundo**, cada uma virando um INSERT e uma chamada ao sender. Logue
+apenas as regras de detecção.
+
+### 7. Contadores auxiliares
+
+```bash
+cp scripts/dg-distinct-ips.sh scripts/dg-connections.py /usr/local/bin/
+chmod 755 /usr/local/bin/dg-distinct-ips.sh
+chmod 700 /usr/local/bin/dg-connections.py    # contém credencial
+pip3 install librouteros --break-system-packages
+```
+
+No CCR (RouterOS 6.x não tem REST API — só a binária):
+
+```
+/user add name=zabbix-ro group=read password=<SENHA> address=<IP_ZABBIX>/32
+/ip service set api address=<IP_ZABBIX>/32 disabled=no
+```
+
+Teste manual antes do cron; ambos devem responder `processed: 1`. Depois,
+no crontab do **root**:
+
+```
+*/5 * * * * /usr/local/bin/dg-distinct-ips.sh >/dev/null 2>&1
+*   * * * * /usr/local/bin/dg-connections.py >/dev/null 2>&1
+```
+
+### 8. Trigger de heartbeat
+
+```
+nodata(/MIKROTIK CCR 1009/ddosguard.agent.heartbeat,5m)=1
+```
+
+Severidade **Average**. É a peça que impede o pipeline de morrer em
+silêncio.
+
+### 9. Endurecimento
+
+```
+/snmp community set [find] addresses=<IP_ZABBIX>/32
+/ip service set www-ssl address=<IP_ZABBIX>/32
+/ip service set www     address=<IP_ZABBIX>/32
+```
+
+Community `public` acessível de IP público é reconhecimento gratuito para
+quem estiver escaneando — especialmente irônico num sistema de detecção
+de scan.
+
+Se algo não funcionar, [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) percorre
+as sete camadas do pipeline na ordem em que o dado viaja.
 
 ---
 

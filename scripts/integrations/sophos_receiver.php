@@ -79,11 +79,15 @@ if ($is_http) {
     $raw   = file_get_contents('php://input');
     $lines = [trim($raw)];
 } else {
-    $lines = [];
-    while (($line = fgets(STDIN)) !== false) {
-        $line = trim($line);
-        if ($line !== '') $lines[] = $line;
-    }
+    // Generator, nao array: sob omprog o processo e persistente e o pipe
+    // do stdin nunca fecha, entao fgets() nunca retorna false e o foreach
+    // abaixo jamais era alcancado. Ver docs/TROUBLESHOOTING.md.
+    $lines = (function () {
+        while (($line = fgets(STDIN)) !== false) {
+            $line = trim($line);
+            if ($line !== '') yield $line;
+        }
+    })();
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

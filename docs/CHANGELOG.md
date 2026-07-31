@@ -1,5 +1,258 @@
 # DDoS Guard — CHANGELOG
 
+## v3 — Integração MikroTik e correção do pipeline de syslog (2026-07-31)
+
+Implantação em produção num **CCR1009-7G-1C-1S+ (RouterOS 6.49.19)**
+enviando syslog para um appliance **Debian 13 + Zabbix 7.4.12**.
+
+O pipeline `MikroTik → rsyslog → omprog → PHP → MySQL → zabbix_sender →
+Zabbix` estava quebrado em **seis pontos independentes**. Nenhum gerava
+erro visível: o rsyslog subia normalmente, o PHP não escrevia em lugar
+nenhum, os itens simplesmente ficavam vazios. O sistema aparentava
+funcionar.
+
+---
+
+### Resumo executivo
+
+| Categoria | Itens |
+|---|---|
+| Bugs corrigidos | 6 (todos silenciosos) |
+| Falsos positivos corrigidos | 2 |
+| Arquivos alterados | 7 |
+| Arquivos novos | 8 |
+| Limitações documentadas | 5 |
+
+---
+
+### 1. Bugs corrigidos
+
+#### 1.1 `module(load="omprog")` ausente — receiver nunca executou
+
+- **Sintoma:** itens de syslog vazios havia dias. `systemctl status
+  rsyslog` mostrava `active (running)`.
+- **Causa:** o `install_integrations.sh` gerava a config sem carregar o
+  módulo `omprog`, mas declarando uma action que o usava. O rsyslog
+  registra `module name 'omprog' is unknown`, **ignora o bloco e segue
+  rodando** — a config quebrada não derruba o serviço.
+- **Agravante:** havia dois arquivos em `/etc/rsyslog.d/` declarando
+  `imudp` e o ruleset `ddosguard`. Como a leitura é alfabética, o input
+  UDP acabou vinculado ao ruleset do arquivo que falhou.
+- **Correção:** `install_integrations.sh` agora carrega o módulo, valida
+  com `rsyslogd -N1` **antes** de reiniciar, e detecta arquivos
+  conflitantes.
+- **Arquivos:** `scripts/integrations/install_integrations.sh`,
+  `rsyslog/ddosguard-syslog.conf` (novo).
+
+#### 1.2 Template do omprog sem `\n` — 100% das mensagens rejeitadas
+
+- **Sintoma:** após corrigir 1.1, o journal encheu de
+  `omprog: messages must be terminated with \n at end of message`.
+- **Causa:** o omprog exige quebra de linha ao fim de cada mensagem.
+  `RSYSLOG_TraditionalForwardFormat` não a inclui.
+- **Correção:** template `DGProgFmt` com `\n` explícito.
+
+#### 1.3 `require_once 'ingest.php'` encerrava o processo do receiver
+
+- **Sintoma:** `{"ok":false,"error":"invalid token"}` a cada mensagem.
+- **Causa:** o `ingest.php` é um endpoint HTTP com código em nível
+  superior. O `require` executava a validação de token e chamava
+  `respond()`, que encerra com `exit` — antes de o receiver processar
+  qualquer linha. Sob CLI não existe header `X-DG-Token`, então falhava
+  sempre.
+- **Diagnóstico em 5 segundos:**
+  `php -r "require '.../ingest.php'; echo 'CHEGUEI AO FIM';"`
+- **Correção:** guard de modo biblioteca no topo do bloco de execução:
+
+  ```php
+  if (defined('DG_INGEST_LIB') || PHP_SAPI === 'cli') { return; }
+  ```
+
+  Em PHP, `return` no escopo de um arquivo incluído interrompe o include
+  preservando tudo que já foi definido. Os cinco receivers agora declaram
+  `define('DG_INGEST_LIB', true)` antes do require.
+- **Arquivos:** `scripts/ingest.php`, os cinco receivers.
+
+#### 1.4 `while (fgets(STDIN))` travava sob omprog — o bug que só aparece em produção
+
+- **Sintoma:** funcionava perfeitamente em teste manual e **nunca** em
+  produção. Um processo PHP vivo, arquivo de log recebendo, banco vazio.
+- **Causa:** o omprog mantém **um** processo vivo e alimenta o stdin
+  continuamente. Com
+
+  ```php
+  $lines = [];
+  while (($line = fgets(STDIN)) !== false) { $lines[] = trim($line); }
+  foreach ($lines as $line) { ... }
+  ```
+
+  o pipe nunca fecha, `fgets()` nunca retorna `false`, e o `foreach`
+  jamais é alcançado. Em teste manual o STDIN encerra e tudo funciona —
+  o que torna o bug particularmente enganoso.
+- **Correção:** generator, processando cada linha assim que chega.
+- **Arquivos:** `syslog_receiver.php`, `mikrotik_receiver.php`,
+  `sophos_receiver.php`.
+
+#### 1.5 `zabbix_sender -i -` sem aspas no host
+
+- **Sintoma:** `processed: 0; failed: 1`, invisível — o `proc_open`
+  descarta o stdout.
+- **Causa:** no formato `-i -` os campos são separados por espaço.
+  `MIKROTIK CCR 1009` era lido como host=`MIKROTIK`, key=`CCR`.
+- **Correção:** host entre aspas em `send_to_zabbix()`. Afeta **todos**
+  os envios, não só MikroTik.
+- **Arquivo:** `scripts/ingest.php`.
+
+#### 1.6 `db_connect()` dentro do loop
+
+- **Causa:** com processo persistente, uma conexão PDO por linha. Sob
+  carga real (dezenas de eventos/s) derruba o MySQL.
+- **Correção:** conexão reaproveitada; o `catch` descarta o handle para
+  forçar reconexão após `wait_timeout`.
+
+---
+
+### 2. Falsos positivos corrigidos
+
+#### 2.1 Google e Cloudflare bloqueados como port scan
+
+- **Sintoma:** `172.217.*`, `104.21.*` na address-list `DDOSGUARD-PORTSCAN`,
+  com origem **porta 443** — tráfego de resposta de conexões que os
+  clientes iniciaram.
+- **Causa:** faltava `accept established,related` como primeira regra do
+  chain `input`, e a detecção não exigia SYN puro. Pacotes RST/ACK
+  tardios, de sessões já expiradas no conntrack (UDP expira em 10s),
+  chegavam classificados como `new`.
+- **Correção:** `accept established,related` em primeiro lugar e
+  `tcp-flags=syn,!ack,!fin,!rst` nas quatro regras da escada de detecção.
+- **Limitação:** escaneadores furtivos (FIN, NULL, XMAS) não usam SYN e
+  passam. Detectá-los exige regra separada.
+
+#### 2.2 Coletor autobloqueado
+
+- **Sintoma:** um `nmap` de teste a partir do Zabbix colocou o próprio
+  coletor na lista de bloqueio; o host apareceu "down" e **todos** os
+  itens SNMP pararam.
+- **Correção:** address-list `DDOSGUARD-WHITELIST` com accept em posição
+  anterior a qualquer regra de detecção, aplicada pelo `.rsc`.
+
+---
+
+### 3. Itens do Zabbix
+
+- **`ddosguard.mtk.cpu.util` não suportado.** A fórmula do template era
+  `last(//system.cpu.util[,idle])` — chave do **agente Zabbix em Linux**,
+  inexistente num host SNMP. Corrigida para
+  `avg(last_foreach(//system.cpu.util[*]))`.
+
+  Dois detalhes: o wildcard substitui um parâmetro **inteiro**, não parte
+  dele (`[hrProcessorLoad.*]` não casa nada); e testar item calculado com
+  `foreach` **no template** sempre falha, porque `//` resolve para o
+  próprio template.
+
+- **`ddosguard.mtk.connections`.** RouterOS 6.x não expõe o total de
+  conexões por SNMP (o OID `1.3.6.1.4.1.14988.1.1.6.1.0` retorna sempre
+  0, mesmo com 28 mil conexões ativas) e não tem REST API — introduzida
+  apenas na 7.1. Alimentado por `dg-connections.py` via API binária
+  (porta 8728), usando `/ip/firewall/connection/tracking/print`, que
+  devolve o total pronto em vez de iterar milhares de objetos.
+
+- **`ddosguard.distinct_ips.rate`.** Alimentado por `dg-distinct-ips.sh`
+  via cron.
+
+- **`hostid`, `severity_score` e `source_platform`** passaram a ser
+  gravados em `ddosguard_blocks`. O `hostid` ia fixo em 0 e o dashboard
+  mostrava "Host protegido: Desconhecido" em toda linha.
+
+- **Descoberta de interfaces PPPoE.** Cada reconexão de cliente gera um
+  `ifIndex` novo. Sem filtro, o host acumulou **12.349 itens**, a maioria
+  órfã, sufocando a fila de pollers SNMP. Filtro documentado em
+  `zabbix/ITEMS.md`.
+
+---
+
+### 4. Volume
+
+Logar todo pacote dropado no chain `forward` de uma rede com clientes
+PPPoE gera dezenas de mensagens por **segundo** — cada uma virando um
+INSERT e uma chamada ao `zabbix_sender`. O `.rsc` desativa o log do drop
+genérico e mantém apenas as regras de detecção, que geram dezenas de
+eventos por **dia**.
+
+Acrescentado logrotate e `EVENT` de purga com retenção de 90 dias.
+
+---
+
+### 4.1 Dashboard
+
+O `provision_dashboard.py` criava apenas 3 widgets e ignorava os três
+painéis SOC (`DDoSSOCOverview`, `DDoSTimeline`, `DDoSMitreHeatmap`)
+adicionados na v2.
+
+- Reescrito: monta 5 widgets próprios + Problems nativo, em duas
+  páginas, com posicionamento recalculado quando algum é omitido —
+  nenhum buraco no grid.
+- Presets `full`, `mikrotik` e `minimal`, mais `--widgets` e `--exclude`
+  para seleção manual.
+- `--dry-run` imprime o JSON antes de criar.
+- Verifica via `module.get` se os módulos estão instalados **e**
+  habilitados antes de chamar `dashboard.create`, que falha com erro
+  pouco informativo nesse caso.
+- Avisa quando um widget selecionado depende de `ddosguard_attacks`,
+  tabela que o `syslog_receiver.php` não popula no caminho MikroTik.
+
+Nenhum módulo foi removido: os cinco leem tabelas diferentes e são
+complementares. O que decide se um painel fica vazio é qual integração
+alimenta cada tabela.
+
+---
+
+### 5. Arquivos novos
+
+| Arquivo | Função |
+|---|---|
+| `mikrotik/ddosguard-ccr.rsc` | Firewall, logging e scheduler do RouterOS |
+| `rsyslog/ddosguard-syslog.conf` | Config canônica do receiver |
+| `rsyslog/ddosguard-logrotate` | Rotação dos logs |
+| `scripts/upgrade_v3.sh` | Upgrade de instalações v2 |
+| `scripts/dg-connections.py` | Alimenta `ddosguard.mtk.connections` |
+| `scripts/dg-distinct-ips.sh` | Alimenta `ddosguard.distinct_ips.rate` |
+| `docs/TROUBLESHOOTING.md` | Diagnóstico camada por camada |
+| `zabbix/ITEMS.md` | Referência de itens, fórmulas e triggers |
+
+---
+
+### 6. Limitações conhecidas
+
+- **`ddosguard.attack.event` não é alimentado.** O parser emite sempre
+  `event_type=block_firewall`, então o caso `attack` do `ingest.php`
+  nunca roda — e, por consequência, o `correlator.php` e o heatmap MITRE
+  ficam zerados para eventos MikroTik. Promover alta severidade para
+  `attack` é decisão de produto, não bug.
+- **Sem enriquecimento GeoIP** no caminho MikroTik: País e ASN vazios.
+- **Escaneadores furtivos** passam pela regra baseada em SYN.
+- **Conexão PDO de longa duração** depende do `catch` para reconectar.
+- **RouterOS 6.x** exige `librouteros` para o contador de conexões.
+
+---
+
+### 7. A lição
+
+Seis falhas independentes, nenhuma gerando erro visível. O que teria
+encurtado o diagnóstico de horas para minutos não era uma ferramenta
+melhor — era o **heartbeat**: um sinal periódico, independente do evento
+monitorado, que transforma silêncio em informação.
+
+Sem ele, ausência de dados é ambígua: pode ser tranquilidade ou cegueira,
+e não há como distinguir. Configure o heartbeat antes de qualquer regra
+de detecção.
+
+```
+nodata(/MIKROTIK CCR 1009/ddosguard.agent.heartbeat,5m)=1
+```
+
+---
+
 ## v2 — Suporte completo a Debian 12/13 + correções de campo (2026-07-05)
 
 Registro de todas as mudanças, correções e atualizações resultantes da

@@ -85,6 +85,16 @@ $ZBX_PORT       = dg_config($file_config, 'DG_ZBX_PORT', '10051');
 // ddos_guard_agent.py / ddos_guard_agent.conf).
 $INGEST_TOKEN = dg_config($file_config, 'DG_INGEST_TOKEN', 'CHANGE_ME_TOKEN');
 
+// Nome técnico e hostid do MikroTik no Zabbix, usados pelo receiver de
+// syslog. O nome precisa ser IDÊNTICO ao campo "Host name" do cadastro
+// (não ao "Visible name"): o zabbix_sender compara byte a byte e rejeita
+// em silêncio se houver qualquer diferença de espaço ou acento.
+//
+//   mysql -N -e "SELECT hostid, host FROM hosts \
+//     WHERE name LIKE '%CCR%' AND status IN (0,1);" <BANCO>
+$MIKROTIK_ZBX_HOST   = dg_config($file_config, 'DG_MIKROTIK_ZBX_HOST', '');
+$MIKROTIK_ZBX_HOSTID = (int) dg_config($file_config, 'DG_MIKROTIK_ZBX_HOSTID', '0');
+
 // ---------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------
@@ -117,8 +127,15 @@ function send_to_zabbix(string $bin, string $server, string $port, string $hostn
     }
     $lines = [];
     foreach ($kv as $key => $value) {
-        // formato: <host> <key> <value>
-        $lines[] = sprintf('%s %s %s', $hostname, $key, $value);
+        // formato: "<host>" <key> <value>
+        //
+        // v3: o host VAI ENTRE ASPAS. No formato `-i -` os campos são
+        // separados por espaço, então um host como "MIKROTIK CCR 1009"
+        // era lido pelo zabbix_sender como host=MIKROTIK, key=CCR,
+        // value="1009 <chave> <valor>" — falhando em silêncio com
+        // "processed: 0; failed: 1".
+        $lines[] = sprintf('"%s" %s %s',
+            str_replace('"', '', $hostname), $key, $value);
     }
     $input = implode("\n", $lines) . "\n";
 
@@ -140,6 +157,22 @@ function send_to_zabbix(string $bin, string $server, string $port, string $hostn
         fclose($pipes[2]);
         proc_close($proc);
     }
+}
+
+// ---------------------------------------------------------------------
+// Modo biblioteca (v3)
+// ---------------------------------------------------------------------
+// Este arquivo é um endpoint HTTP, mas também é incluído via require_once
+// pelos receivers em integrations/. Sem este guard, o `require` executava
+// o bloco de autenticação abaixo e encerrava o processo com
+// `{"ok":false,"error":"invalid token"}` — em CLI não existe header
+// X-DG-Token — antes de o receiver processar uma única linha.
+//
+// Com o guard, as funções (respond, db_connect, send_to_zabbix) e as
+// variáveis de configuração definidas acima continuam disponíveis para o
+// chamador, e o endpoint só executa quando acessado de fato por HTTP.
+if (defined('DG_INGEST_LIB') || PHP_SAPI === 'cli') {
+    return;
 }
 
 // ---------------------------------------------------------------------
