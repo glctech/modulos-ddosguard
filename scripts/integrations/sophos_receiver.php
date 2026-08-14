@@ -71,7 +71,7 @@ $is_http = (PHP_SAPI === 'fpm-fcgi' || PHP_SAPI === 'apache2handler'
 if ($is_http) {
     header('Content-Type: application/json; charset=utf-8');
     $token = $_SERVER['HTTP_X_DG_TOKEN'] ?? '';
-    if ($token !== $INGEST_TOKEN) {
+    if (!hash_equals($INGEST_TOKEN, (string) $token)) {
         http_response_code(401);
         echo json_encode(['ok' => false, 'error' => 'unauthorized']);
         exit;
