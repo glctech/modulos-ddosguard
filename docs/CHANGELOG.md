@@ -1,5 +1,91 @@
 # DDoS Guard — CHANGELOG
 
+## v3.1 — Melhorias na detecção Firewall/Antivírus dos templates de agente (2026-08-14)
+
+Evolução direta da auditoria de 2026-08 (`docs/AUDITORIA_2026-08.md`), nos
+dois templates de agente: `template_ddos_guard_agent.yaml` (Linux/Windows
+genérico) e `template_ddos_guard_agent_windows.yaml` (Windows Server
+dedicado).
+
+### Bug corrigido: `min()` nas triggers de volume de firewall/antivírus
+
+- **Sintoma:** as triggers "Volume alto de bloqueios de firewall" e
+  "Múltiplas detecções de malware" praticamente nunca disparavam em
+  produção, mesmo sob volume real de bloqueios/detecções.
+- **Causa:** o agente (`ddos_guard_agent.py`) envia cada bloqueio de
+  firewall e cada detecção de antivírus como um evento HTTP individual,
+  sempre com valor `1` (ver `_process_firewall_lines`,
+  `_process_clamav_lines`, `_process_windows_firewall_events`,
+  `_process_windows_defender_events`) — ao contrário de
+  `ddosguard.attacks.rate`, que carrega a contagem real agregada por
+  ciclo. As triggers usavam `min(...)>=N`, que exige que **todo** valor
+  no período seja `>= N`; como cada amostra individual vale `1`, a
+  condição nunca era satisfeita para `N` maior que 1.
+- **Correção:** expressão trocada para `sum(...)>=N`, que soma os
+  eventos no período — o comportamento que "volume de bloqueios/N min"
+  sempre pretendeu medir. `ddosguard.attacks.rate` e
+  `ddosguard.distinct_ips.rate` não foram alteradas: já carregam
+  contagens/gauges legítimos, e `min()` ali funciona como histerese
+  intencional (exige volume sustentado ao longo da janela, não um pico
+  isolado).
+
+### Thresholds configuráveis por host (macros)
+
+O template `template_ddos_guard_agent_windows.yaml` já usava macros
+`{$DG.*}` para os limiares das triggers; `template_ddos_guard_agent.yaml`
+(Linux/genérico) tinha tudo hardcoded na expressão. Adicionadas as
+mesmas oito macros ao template Linux/genérico, para paridade entre os
+dois:
+`{$DG.HEARTBEAT.TIMEOUT}`, `{$DG.ATTACK.WARN}`, `{$DG.ATTACK.DISASTER}`,
+`{$DG.DISTINCT_IPS.DISASTER}`, `{$DG.FIREWALL.WARN}`, `{$DG.AV.WARN}`,
+`{$DG.AV.HIGH}`, `{$DG.AV.DISASTER}` — valores padrão idênticos aos já
+usados nas triggers anteriores, para não alterar o comportamento de
+instalações existentes na importação.
+
+### Severidade escalonada do antivírus (3 níveis)
+
+Antes: uma única trigger HIGH em `>= 5 detecções/10min`. Agora, nos dois
+templates de agente:
+
+| Trigger | Prioridade | Condição padrão |
+|---|---|---|
+| Antivírus detectou ameaça | WARNING | `>= {$DG.AV.WARN}` (1) detecção/10min |
+| Múltiplas detecções de malware | HIGH | `>= {$DG.AV.HIGH}` (5) detecções/10min |
+| Possível surto de malware | DISASTER | `>= {$DG.AV.DISASTER}` (20) detecções/10min |
+
+Encadeadas por `dependencies` (mesmo padrão já usado nas triggers de
+`attacks.rate`): a trigger de nível mais alto depende da anterior, então
+uma única detecção não dispara três alertas superpostos — a UI do Zabbix
+mostra apenas o nível mais severo ativo.
+
+### Nova trigger: firewall + antivírus correlacionados
+
+Firewall e antivírus eram avaliados de forma totalmente independente,
+mesmo sendo, juntos, um indicador mais forte de comprometimento ativo do
+que qualquer um isoladamente (ex.: invasor explorando o host pela rede e
+deixando um artefato malicioso no disco). Nova trigger HIGH, sem
+dependência das demais:
+
+```
+sum(ddosguard.firewall.rate,15m)>0 and sum(ddosguard.antivirus.rate,15m)>0
+```
+
+Janela de 15 minutos — mais ampla que os 10 minutos das triggers
+individuais — para dar margem a eventos de fontes diferentes que não
+chegam no mesmo instante.
+
+### Compatibilidade
+
+Nenhum item, chave, payload JSON ou coluna de banco foi alterado — só
+expressões de trigger e macros novas. Reimportar os dois templates é
+seguro em instalações existentes; hosts que já têm os templates
+associados recebem as macros com os valores padrão atuais (equivalentes
+ao comportamento anterior, exceto pela correção do bug `min()`/`sum()`,
+que passa a fazer as triggers de firewall/antivírus disparar como
+sempre deveriam).
+
+---
+
 ## v3 — Integração MikroTik e correção do pipeline de syslog (2026-07-31)
 
 Implantação em produção num **CCR1009-7G-1C-1S+ (RouterOS 6.49.19)**

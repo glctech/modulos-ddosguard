@@ -19,6 +19,38 @@ zabbix_export:
       \nCompatível com Zabbix 7.4+\nAgente: ddos_guard_agent.py (Linux e Windows)\n"
     groups:
     - name: Templates/Security
+    macros:
+    - macro: '{$DG.HEARTBEAT.TIMEOUT}'
+      value: 15m
+      description: Tempo sem heartbeat do agente para considerar o host sem monitoramento
+        ativo
+    - macro: '{$DG.ATTACK.WARN}'
+      value: '50'
+      description: Tentativas de ataque/min (janela de 2min) para disparar alerta
+        HIGH
+    - macro: '{$DG.ATTACK.DISASTER}'
+      value: '200'
+      description: Tentativas de ataque/min sustentadas por 5min para disparar alerta
+        DISASTER (possivel DDoS)
+    - macro: '{$DG.DISTINCT_IPS.DISASTER}'
+      value: '50'
+      description: IPs de origem distintos em 5min para disparar alerta DISASTER
+        (ataque distribuido)
+    - macro: '{$DG.FIREWALL.WARN}'
+      value: '500'
+      description: Bloqueios de firewall em 10min para disparar alerta HIGH
+    - macro: '{$DG.AV.WARN}'
+      value: '1'
+      description: Deteccoes de antivirus em 10min para disparar alerta WARNING
+        (primeira deteccao)
+    - macro: '{$DG.AV.HIGH}'
+      value: '5'
+      description: Deteccoes de antivirus em 10min para disparar alerta HIGH (multiplas
+        deteccoes)
+    - macro: '{$DG.AV.DISASTER}'
+      value: '20'
+      description: Deteccoes de antivirus em 10min para disparar alerta DISASTER
+        (possivel surto/infeccao em massa)
     items:
     - uuid: fc05ee02f0d74bd8b0f63ec2e9010b0d
       name: 'DDoS Guard: agent heartbeat'
@@ -38,10 +70,10 @@ zabbix_export:
         value: ddosguard-agent
       triggers:
       - uuid: f75c75bfcd58480886a4174191c9f883
-        expression: nodata(/DDoS Guard - Agent/ddosguard.agent.heartbeat,15m)=1
+        expression: nodata(/DDoS Guard - Agent/ddosguard.agent.heartbeat,{$DG.HEARTBEAT.TIMEOUT})=1
         name: DDoS Guard Agent parou em {HOST.NAME}
         priority: WARNING
-        description: "O agente coletor não envia heartbeat há mais de 15 minutos.\n\
+        description: "O agente coletor não envia heartbeat há mais de {$DG.HEARTBEAT.TIMEOUT}.\n\
           Verifique o serviço ddos-guard-agent no host monitorado:\n  Linux:   systemctl\
           \ status ddos-guard-agent\n  Windows: Get-Service DDoSGuardAgent\n"
         manual_close: 'YES'
@@ -70,8 +102,8 @@ zabbix_export:
         value: ddosguard-agent
       triggers:
       - uuid: 949eb69c4f49420fad45a221254c25f3
-        expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>=50
-        name: Pico de ataques em {HOST.NAME} (>= 50/min)
+        expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>={$DG.ATTACK.WARN}
+        name: Pico de ataques em {HOST.NAME} (>= {$DG.ATTACK.WARN}/min)
         priority: HIGH
         description: 'Aumento anormal no número de tentativas de ataque detectadas
 
@@ -87,8 +119,9 @@ zabbix_export:
         - tag: component
           value: ddos
       - uuid: 434e14339a654f728cd86c746fe3677e
-        expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,5m)>=200
-        name: Possível ataque DDoS em {HOST.NAME} (>= 200/min por 5min)
+        expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,5m)>={$DG.ATTACK.DISASTER}
+        name: Possível ataque DDoS em {HOST.NAME} (>= {$DG.ATTACK.DISASTER}/min por
+          5min)
         priority: DISASTER
         description: 'Volume sustentado de tentativas de ataque muito acima do normal.
 
@@ -99,8 +132,8 @@ zabbix_export:
           '
         manual_close: 'YES'
         dependencies:
-        - name: Pico de ataques em {HOST.NAME} (>= 50/min)
-          expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>=50
+        - name: Pico de ataques em {HOST.NAME} (>= {$DG.ATTACK.WARN}/min)
+          expression: min(/DDoS Guard - Agent/ddosguard.attacks.rate,2m)>={$DG.ATTACK.WARN}
         tags:
         - tag: scope
           value: availability
@@ -126,8 +159,8 @@ zabbix_export:
         value: ddosguard-agent
       triggers:
       - uuid: 027af34b95d54618a0a422dc8a90d722
-        expression: min(/DDoS Guard - Agent/ddosguard.distinct_ips.rate,5m)>=50
-        name: Ataque distribuído em {HOST.NAME} — muitas origens distintas (>= 50
+        expression: min(/DDoS Guard - Agent/ddosguard.distinct_ips.rate,5m)>={$DG.DISTINCT_IPS.DISASTER}
+        name: Ataque distribuído em {HOST.NAME} — muitas origens distintas (>= {$DG.DISTINCT_IPS.DISASTER}
           IPs)
         priority: DISASTER
         description: 'Grande número de IPs distintos atacando simultaneamente é
@@ -163,12 +196,23 @@ zabbix_export:
         value: ddosguard-agent
       triggers:
       - uuid: e10fc4abd14c471186f82f68556b1c64
-        expression: min(/DDoS Guard - Agent/ddosguard.firewall.rate,10m)>=500
-        name: Volume alto de bloqueios de firewall em {HOST.NAME} (>= 500/min)
+        expression: sum(/DDoS Guard - Agent/ddosguard.firewall.rate,10m)>={$DG.FIREWALL.WARN}
+        name: Volume alto de bloqueios de firewall em {HOST.NAME} (>= {$DG.FIREWALL.WARN}
+          bloqueios/10min)
         priority: HIGH
-        description: 'O firewall está bloqueando um volume anormalmente alto de conexões.
+        description: 'O firewall bloqueou um volume anormalmente alto de conexões
+          nos últimos 10 minutos.
 
           Pode indicar ataque em andamento sendo contido pelo firewall.
+
+
+          Nota técnica: o agente envia cada bloqueio como um evento individual
+
+          (valor sempre 1), não como uma taxa pré-calculada — por isso a expressão
+
+          soma (sum) os eventos na janela em vez de usar min(), que exigiria que
+
+          TODO valor no período fosse >= limiar e nunca dispararia na prática.
 
           '
         manual_close: 'YES'
@@ -196,15 +240,89 @@ zabbix_export:
       - tag: source
         value: ddosguard-agent
       triggers:
+      - uuid: e795bf87ca37433ea7b5c19b0a20efb6
+        expression: sum(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>={$DG.AV.WARN}
+        name: Antivírus detectou ameaça em {HOST.NAME}
+        priority: WARNING
+        description: 'O antivírus detectou e agiu sobre uma ameaça no host.
+
+          Primeira detecção — confirme se foi contida (verifique o item
+
+          "raw block event - antivirus" para o nome do malware e a ação tomada).
+
+          '
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+        - tag: component
+          value: antivirus
       - uuid: cb5a87217f684d0cac48b88871ae6d34
-        expression: min(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>=5
-        name: Múltiplas detecções de malware em {HOST.NAME}
+        expression: sum(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>={$DG.AV.HIGH}
+        name: Múltiplas detecções de malware em {HOST.NAME} (>= {$DG.AV.HIGH}/10min)
         priority: HIGH
         description: 'O antivírus detectou múltiplas ameaças em curto período.
 
           Verifique o host imediatamente — possível infecção ativa ou
 
           tentativa de intrusão via arquivo malicioso.
+
+
+          Nota técnica: soma (sum) os eventos na janela em vez de usar min(),
+
+          já que cada detecção é enviada como evento individual (valor sempre 1).
+
+          '
+        manual_close: 'YES'
+        dependencies:
+        - name: Antivírus detectou ameaça em {HOST.NAME}
+          expression: sum(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>={$DG.AV.WARN}
+        tags:
+        - tag: scope
+          value: security
+        - tag: component
+          value: antivirus
+      - uuid: 90933fd5eb314b068d09ca406d59dd10
+        expression: sum(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>={$DG.AV.DISASTER}
+        name: Possível surto de malware em {HOST.NAME} (>= {$DG.AV.DISASTER}/10min)
+        priority: DISASTER
+        description: 'Volume muito alto de detecções de antivírus no mesmo host
+
+          em curto período — padrão consistente com infecção ativa se espalhando
+
+          (worm, ransomware em execução) em vez de um arquivo isolado.
+
+          Ação imediata: isole o host da rede e acione a resposta a incidentes.
+
+          '
+        manual_close: 'YES'
+        dependencies:
+        - name: Múltiplas detecções de malware em {HOST.NAME} (>= {$DG.AV.HIGH}/10min)
+          expression: sum(/DDoS Guard - Agent/ddosguard.antivirus.rate,10m)>={$DG.AV.HIGH}
+        tags:
+        - tag: scope
+          value: security
+        - tag: component
+          value: antivirus
+      - uuid: 6cea379a57e8426e824e44b33f8c6515
+        expression: sum(/DDoS Guard - Agent/ddosguard.firewall.rate,15m)>0 and sum(/DDoS
+          Guard - Agent/ddosguard.antivirus.rate,15m)>0
+        name: Firewall e antivírus ativos simultaneamente em {HOST.NAME}
+        priority: HIGH
+        description: 'O mesmo host teve bloqueios de firewall E detecções de antivírus
+
+          nos últimos 15 minutos — sinal mais forte de comprometimento ativo do
+
+          que qualquer um dos dois isoladamente (ex.: um invasor explorando o
+
+          host via rede e deixando um artefato malicioso no disco).
+
+
+          Janela de 15min (mais ampla que os 10min das triggers individuais) para
+
+          capturar eventos de ferramentas diferentes que não chegam exatamente
+
+          no mesmo instante.
 
           '
         manual_close: 'YES'

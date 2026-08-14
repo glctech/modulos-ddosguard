@@ -46,7 +46,15 @@ zabbix_export:
       description: Threshold de bloqueios de firewall/min para trigger HIGH
     - macro: '{$DG.AV.WARN}'
       value: '1'
-      description: 'Qualquer deteccao do Defender dispara alerta (recomendado: 1)'
+      description: 'Deteccoes do Defender em 10min para disparar alerta WARNING (recomendado: 1, qualquer deteccao)'
+    - macro: '{$DG.AV.HIGH}'
+      value: '5'
+      description: Deteccoes do Defender em 10min para disparar alerta HIGH (multiplas
+        deteccoes)
+    - macro: '{$DG.AV.DISASTER}'
+      value: '20'
+      description: Deteccoes do Defender em 10min para disparar alerta DISASTER
+        (possivel surto/infeccao em massa)
     - macro: '{$DG.HEARTBEAT.TIMEOUT}'
       value: 15m
       description: Tempo sem heartbeat para considerar agente parado
@@ -204,10 +212,14 @@ zabbix_export:
         value: ddosguard-agent
       triggers:
       - uuid: 5a68ef762fa44c46bd5d4e72084e964b
-        expression: min(/DDoS Guard - Agent Windows/ddosguard.firewall.rate,10m)>={$DG.FIREWALL.WARN}
-        name: Volume alto de bloqueios de firewall em {HOST.NAME} (>={$DG.FIREWALL.WARN}/min)
+        expression: sum(/DDoS Guard - Agent Windows/ddosguard.firewall.rate,10m)>={$DG.FIREWALL.WARN}
+        name: Volume alto de bloqueios de firewall em {HOST.NAME} (>={$DG.FIREWALL.WARN}/10min)
         priority: HIGH
-        description: "Windows Firewall bloqueando volume anormal de conexoes.\nVerificar:\n\
+        description: "Windows Firewall bloqueou volume anormal de conexoes nos ultimos\
+          \ 10 minutos.\nNota tecnica: cada bloqueio (5152/5157) e enviado como evento\
+          \ individual\n(valor sempre 1), por isso a expressao soma (sum) os eventos\
+          \ na janela\nem vez de usar min(), que exigiria TODO valor no periodo >=\
+          \ limiar\ne nunca dispararia na pratica.\nVerificar:\n\
           \  Get-WinEvent -LogName \"Security\" |\n    Where-Object {$_.Id -in @(5152,5157)}\
           \ | Select-Object -First 20\n"
         manual_close: 'YES'
@@ -240,18 +252,62 @@ zabbix_export:
         value: ddosguard-agent
       triggers:
       - uuid: ca84c0475bbf469fadbe197dee81de81
-        expression: min(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,10m)>={$DG.AV.WARN}
+        expression: sum(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,10m)>={$DG.AV.WARN}
         name: Windows Defender detectou ameaca em {HOST.NAME}
-        priority: HIGH
+        priority: WARNING
         description: "O Windows Defender detectou e agiu sobre uma ameaca no servidor.\n\
-          Em servidores, qualquer deteccao deve ser investigada imediatamente.\n\n\
-          Investigar:\n  Get-MpThreatDetection | Select-Object -First 5 | Format-List\n\
-          \  Get-WinEvent -LogName \"Microsoft-Windows-Windows Defender/Operational\"\
-          \ |\n    Where-Object { $_.Id -in @(1116,1117) } | Select-Object -First\
-          \ 10\n\nSe confirmado, isolar o host:\n  1. Bloquear acesso de rede se possivel\n\
+          Primeira deteccao — confirme se foi contida.\n\nInvestigar:\n  Get-MpThreatDetection\
+          \ | Select-Object -First 5 | Format-List\n  Get-WinEvent -LogName \"Microsoft-Windows-Windows\
+          \ Defender/Operational\" |\n    Where-Object { $_.Id -in @(1116,1117) }\
+          \ | Select-Object -First 10\n\nVerificar item \"raw block event - antivirus\"\
+          \ para nome do malware.\n"
+        manual_close: 'YES'
+        tags:
+        - tag: scope
+          value: security
+      - uuid: 6070b5942650458786296d00b668d256
+        expression: sum(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,10m)>={$DG.AV.HIGH}
+        name: Multiplas deteccoes de malware em {HOST.NAME} (>={$DG.AV.HIGH}/10min)
+        priority: HIGH
+        description: "O Windows Defender detectou multiplas ameacas em curto periodo.\n\
+          Verifique o host imediatamente — possivel infeccao ativa.\n\nInvestigar:\n\
+          \  Get-MpThreatDetection | Select-Object -First 10 | Format-List\n\nSe\
+          \ confirmado, isolar o host:\n  1. Bloquear acesso de rede se possivel\n\
           \  2. Fazer varredura completa: Start-MpScan -ScanType FullScan\n  3. Verificar\
           \ item \"raw block event - antivirus\" para nome do malware\n  4. Acionar\
           \ equipe de resposta a incidentes se necessario\n"
+        manual_close: 'YES'
+        dependencies:
+        - name: Windows Defender detectou ameaca em {HOST.NAME}
+          expression: sum(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,10m)>={$DG.AV.WARN}
+        tags:
+        - tag: scope
+          value: security
+      - uuid: a9ac2263bb1b4ced99a2f3ba1b90f692
+        expression: sum(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,10m)>={$DG.AV.DISASTER}
+        name: Possivel surto de malware em {HOST.NAME} (>={$DG.AV.DISASTER}/10min)
+        priority: DISASTER
+        description: "Volume muito alto de deteccoes no mesmo host em curto periodo\
+          \ —\npadrao consistente com infeccao ativa se espalhando (worm, ransomware\n\
+          em execucao) em vez de um arquivo isolado.\nAcao imediata: isole o host\
+          \ da rede e acione a resposta a incidentes.\n"
+        manual_close: 'YES'
+        dependencies:
+        - name: Multiplas deteccoes de malware em {HOST.NAME} (>={$DG.AV.HIGH}/10min)
+          expression: sum(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,10m)>={$DG.AV.HIGH}
+        tags:
+        - tag: scope
+          value: security
+      - uuid: bb2c6d4e769843748b990b655e5ea292
+        expression: sum(/DDoS Guard - Agent Windows/ddosguard.firewall.rate,15m)>0
+          and sum(/DDoS Guard - Agent Windows/ddosguard.antivirus.rate,15m)>0
+        name: Firewall e antivirus ativos simultaneamente em {HOST.NAME}
+        priority: HIGH
+        description: "O mesmo host teve bloqueios de firewall E deteccoes de antivirus\n\
+          nos ultimos 15 minutos — sinal mais forte de comprometimento ativo do\n\
+          que qualquer um dos dois isoladamente.\nJanela de 15min (mais ampla que\
+          \ os 10min das triggers individuais) para\ncapturar eventos de fontes\
+          \ diferentes que nao chegam no mesmo instante.\n"
         manual_close: 'YES'
         tags:
         - tag: scope
