@@ -442,6 +442,11 @@ class IngestClient:
         self.url = url
         self.token = token
 
+    # Espera (segundos) entre tentativas, em caso de falha de rede transitoria
+    # (timeout, conexao recusada, DNS). Erros HTTP do servidor (401, 400 etc.)
+    # nao sao re-tentados: repetir a mesma requisicao nao muda o resultado.
+    RETRY_BACKOFF = (1, 2, 4)
+
     def send(self, event_type, hostname, hostid, payload):
         body = dict(payload)
         body["event_type"] = event_type
@@ -456,15 +461,28 @@ class IngestClient:
                 "X-DG-Token": self.token,
             },
         )
-        try:
-            with urllib.request.urlopen(req, timeout=5) as r:
-                r.read()
-            if event_type == "heartbeat":
-                log(f"Heartbeat enviado com sucesso para {self.url}")
-            return True
-        except urllib.error.URLError as e:
-            log(f"Falha ao enviar evento '{event_type}' para o ingest: {e}")
-            return False
+
+        attempts = len(self.RETRY_BACKOFF) + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    r.read()
+                if event_type == "heartbeat":
+                    log(f"Heartbeat enviado com sucesso para {self.url}")
+                return True
+            except urllib.error.HTTPError as e:
+                log(f"Falha ao enviar evento '{event_type}' para o ingest: {e}")
+                return False
+            except urllib.error.URLError as e:
+                if attempt >= attempts:
+                    log(f"Falha ao enviar evento '{event_type}' para o ingest "
+                        f"apos {attempt} tentativas: {e}")
+                    return False
+                wait = self.RETRY_BACKOFF[attempt - 1]
+                log(f"Falha ao enviar evento '{event_type}' (tentativa "
+                    f"{attempt}/{attempts}): {e} - nova tentativa em {wait}s")
+                time.sleep(wait)
+        return False
 
 
 # ---------------------------------------------------------------------
@@ -522,8 +540,25 @@ class DDoSGuardAgent:
             # UFW AUDIT e apenas informativo (nao e bloqueio nem ataque)
             if "[UFW AUDIT]" in line and "[UFW BLOCK]" not in line:
                 continue
-            # UFW ALLOW de trafego de ENTRADA com IP externo = monitora mas nao bloqueia
-            is_ufw_allow_in = "[UFW ALLOW]" in line and "IN=" in line and "OUT= " not in line
+            # UFW ALLOW de trafego de ENTRADA com IP externo = trafego legitimo,
+            # permitido explicitamente por uma regra. Nao e bloqueio nem ataque:
+            # contá-lo como tentativa infla ddosguard.attacks.rate com conexões
+            # normais (ex.: visitantes de um servidor web) e pode disparar as
+            # triggers de "pico de ataques" / "possível DDoS" para tráfego legítimo.
+            #
+            # OUT= vazio (nada entre "OUT=" e o proximo campo) indica que o
+            # pacote termina no proprio host (chain INPUT), e nao e roteado/
+            # encaminhado (chain FORWARD, onde OUT= tem uma interface real).
+            # Checar a substring "OUT= " sem uma regex casaria SEMPRE com o
+            # formato padrao do UFW (`OUT= MAC=...`), fazendo esta deteccao
+            # nunca disparar - por isso o valor do campo precisa ser extraido.
+            out_match = re.search(r"OUT=(\S*)", line)
+            is_ufw_allow_in = (
+                "[UFW ALLOW]" in line and "IN=" in line
+                and out_match is not None and out_match.group(1) == ""
+            )
+            if is_ufw_allow_in:
+                continue
 
             ip = extract_ip(line)
             if not ip or is_private_ip(ip):

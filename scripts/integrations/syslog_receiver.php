@@ -64,7 +64,7 @@ $is_http = (PHP_SAPI === 'fpm-fcgi' || PHP_SAPI === 'apache2handler' || isset($_
 if ($is_http) {
     // Modo HTTP: valida token
     $token = $_SERVER['HTTP_X_DG_TOKEN'] ?? '';
-    if ($token !== $INGEST_TOKEN) {
+    if (!hash_equals($INGEST_TOKEN, (string) $token)) {
         http_response_code(401);
         echo json_encode(['ok' => false, 'error' => 'unauthorized']);
         exit;

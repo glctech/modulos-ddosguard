@@ -42,7 +42,7 @@ require_once dirname(__DIR__) . '/ingest.php';   // carrega helpers (db_connect,
 
 // Valida token
 $token = $_SERVER['HTTP_X_DG_TOKEN'] ?? ($_GET['token'] ?? '');
-if ($token !== $INGEST_TOKEN) {
+if (!hash_equals($INGEST_TOKEN, (string) $token)) {
     http_response_code(401);
     echo json_encode(['ok' => false, 'error' => 'unauthorized']);
     exit;
