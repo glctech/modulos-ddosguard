@@ -76,7 +76,7 @@ zabbix_export:
         value: ddosguard-agent
       triggers:
       - uuid: 3d297246924b4852974b0098a6576389
-        expression: min(/DDoS Guard - FortiGate Security/ddosguard.firewall.rate,10m)>={$FG.IPS.BLOCK.HIGH}
+        expression: sum(/DDoS Guard - FortiGate Security/ddosguard.firewall.rate,10m)>={$FG.IPS.BLOCK.HIGH}
         name: 'FortiGate: Volume critico de bloqueios em {HOST.NAME} (>={$FG.IPS.BLOCK.HIGH}/min)'
         priority: HIGH
         description: 'O FortiGate esta bloqueando um volume critico de conexoes.
@@ -84,6 +84,10 @@ zabbix_export:
           Possivel ataque DDoS em andamento.
 
           Verifique o dashboard DDoS Guard Security Operations Center.
+
+          Cada bloqueio chega como evento individual (valor sempre 1) via syslog;
+
+          soma (sum) os eventos na janela em vez de min(), que nunca dispararia.
 
           '
         manual_close: 'YES'
@@ -377,7 +381,7 @@ zabbix_export:
         value: fortiswitch
       triggers:
       - uuid: 3ae8fdf7f9434ba2a6cbbf2d4df22cef
-        expression: min(/DDoS Guard - FortiSwitch Security/ddosguard.firewall.rate,5m)>={$FSW.PORT.VIOLATIONS.WARN}
+        expression: sum(/DDoS Guard - FortiSwitch Security/ddosguard.firewall.rate,5m)>={$FSW.PORT.VIOLATIONS.WARN}
         name: 'FortiSwitch: Alto volume de violacoes de seguranca em {HOST.NAME}'
         priority: HIGH
         description: 'O FortiSwitch esta detectando um volume elevado de violacoes

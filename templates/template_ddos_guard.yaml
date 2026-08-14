@@ -140,11 +140,13 @@ zabbix_export:
         value: antivirus
       triggers:
       - uuid: 6be29b2364c64ccd882dff6fd760267a
-        expression: min(/DDoS Guard - Security Monitoring/ddosguard.antivirus.rate,10m)>=10
+        expression: sum(/DDoS Guard - Security Monitoring/ddosguard.antivirus.rate,10m)>=10
         name: Múltiplas detecções de malware em {HOST.NAME}
         priority: HIGH
         description: O antivírus detectou/bloqueou múltiplas ameaças em curto período.
-          Verifique o host imediatamente.
+          Verifique o host imediatamente. Cada detecção é enviada como evento
+          individual (valor sempre 1) — soma (sum) os eventos na janela em vez
+          de min(), que exigiria todo valor no período >= limiar e nunca dispararia.
         tags:
         - tag: scope
           value: security

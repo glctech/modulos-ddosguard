@@ -148,6 +148,63 @@ systemctl restart rsyslog
 A v3 corrige seis falhas silenciosas do pipeline de syslog — nenhuma
 delas gerava erro visível. Ver [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
+## Auditoria e melhorias recentes (2026-08)
+
+Auditoria técnica completa do módulo (código-fonte, agentes,
+integrações, templates, banco de dados, segurança, performance e
+interface). Relatório completo em
+[`docs/AUDITORIA_2026-08.md`](docs/AUDITORIA_2026-08.md); histórico
+detalhado de cada mudança em [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
+(v3.1 e v3.2).
+
+**Detecção — bug corrigido em todos os 6 templates.** As triggers de
+volume de firewall/antivírus (`ddosguard.firewall.rate`,
+`ddosguard.antivirus.rate`) usavam `min()` sobre um item que o
+agente/receivers sempre enviam como evento individual (valor sempre
+`1`) — isso exige que **todo** valor no período seja ≥ limiar, o que
+nunca acontece, tornando essas triggers praticamente impossíveis de
+disparar em produção. Corrigido para `sum()` no template do agente
+(Linux/Windows), no template dedicado do Windows Server, e nos
+templates Security Monitoring, Sophos, FortiGate/FortiSwitch e
+MikroTik.
+
+**Detecção — antivírus escalonado em 3 níveis.** Antes: um único
+alerta HIGH a partir de 5 detecções/10min. Agora, nos templates de
+agente: WARNING na primeira detecção, HIGH a partir de 5, DISASTER a
+partir de 20 (possível surto/infecção em massa) — limiares ajustáveis
+por host via macro `{$DG.AV.*}`.
+
+**Detecção — nova correlação firewall + antivírus.** Trigger HIGH
+dedicada quando o mesmo host tem bloqueios de firewall **e** detecções
+de antivírus na mesma janela de 15 minutos — sinal mais forte de
+comprometimento ativo do que qualquer métrica isolada.
+
+**Detecção — thresholds configuráveis por host.** O template do
+agente Linux/Windows ganhou as mesmas macros `{$DG.*}` que o template
+dedicado do Windows já tinha, para ajustar sensibilidade por host sem
+editar o template.
+
+**Falso positivo eliminado no agente Linux.** Tráfego `[UFW ALLOW]`
+legítimo (ex.: visitante normal de um servidor web) era registrado
+como "ataque bloqueado" por um bug de detecção do campo `OUT=` do log
+— podia inflar `ddosguard.attacks.rate` e disparar as triggers de
+"possível DDoS" em tráfego normal.
+
+**Segurança.** Comparação do token de autenticação padronizada para
+`hash_equals()` (tempo constante) nos 5 receivers de integração
+(Sophos, Suricata, Wazuh, syslog genérico, MikroTik) — já era assim no
+`ingest.php` principal. Senha da API do `provision_dashboard.py` deixa
+de aceitar-se apenas via linha de comando — pergunta interativamente
+via `getpass` quando não informada por flag.
+
+**Confiabilidade.** Retry com backoff (3×, 1s/2s/4s) implementado no
+agente coletor para falhas de rede transitórias no envio de eventos —
+antes um evento era perdido silenciosamente na primeira falha.
+
+**Testes automatizados novos.** `tests/test_ddos_guard_agent.py` (7
+casos) e `tests/test_templates.py` (16 casos, cobrindo os 6 templates)
+protegem essas correções contra regressão.
+
 ## Estrutura do pacote
 
 ```

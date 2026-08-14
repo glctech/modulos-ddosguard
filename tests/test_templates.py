@@ -1,22 +1,30 @@
 #!/usr/bin/env python3
 """
-Testes de regressao para os templates Zabbix de agente
-(templates/template_ddos_guard_agent.yaml e
-templates/template_ddos_guard_agent_windows.yaml).
+Testes de regressao para os templates Zabbix do DDoS Guard
+(templates/*.yaml).
 
 Cobre a melhoria de deteccao de 2026-08-14 (ver docs/CHANGELOG.md, v3.1):
 
-  1. ddosguard.firewall.rate e ddosguard.antivirus.rate sao enviados pelo
-     agente como eventos individuais (valor sempre 1) - as triggers de
-     volume precisam usar sum(), nao min(), ou nunca disparam na pratica.
-  2. Os limiares de deteccao ficam em macros {$DG.*}, nao hardcoded.
-  3. Existe uma trigger de correlacao firewall+antivirus por host.
+  1. Varios itens sao alimentados por receivers/agente como eventos
+     individuais (valor sempre 1): ddosguard.firewall.rate,
+     ddosguard.antivirus.rate, ddosguard.mtk.portscan,
+     ddosguard.mtk.bruteforce. Triggers de volume sobre esses itens
+     precisam usar sum(), nao min() - min() exige que TODO valor no
+     periodo seja >= limiar, o que nunca acontece quando cada amostra
+     vale exatamente 1, tornando a trigger praticamente impossivel de
+     disparar. Esse bug existia nos 6 templates do projeto; corrigido
+     em todos.
+  2. Nos templates de agente, os limiares de deteccao ficam em macros
+     {$DG.*}, nao hardcoded.
+  3. Existe uma trigger de correlacao firewall+antivirus por host nos
+     templates de agente.
   4. Toda dependencia de trigger resolve para uma trigger real do mesmo
-     template (nome + expressao identicos).
+     template (nome + expressao identicos), em qualquer template.
 
 Uso:
     python3 tests/test_templates.py
 """
+import glob
 import os
 import unittest
 
@@ -24,12 +32,30 @@ import yaml
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "..", "templates")
 
+# Itens que o agente/receivers enviam como evento individual (valor sempre
+# 1) em vez de contagem/gauge agregada - min() nunca deveria ser usado em
+# triggers de volume sobre eles.
+PER_EVENT_COUNTER_KEYS = (
+    "ddosguard.firewall.rate",
+    "ddosguard.antivirus.rate",
+    "ddosguard.mtk.portscan",
+    "ddosguard.mtk.bruteforce",
+)
+
 
 def load_template(filename):
     path = os.path.join(TEMPLATES_DIR, filename)
     with open(path, encoding="utf-8") as f:
         doc = yaml.safe_load(f)
     return doc["zabbix_export"]["templates"][0]
+
+
+def load_all_templates(filename):
+    """Alguns arquivos (ex.: fortigate) exportam mais de um template."""
+    path = os.path.join(TEMPLATES_DIR, filename)
+    with open(path, encoding="utf-8") as f:
+        doc = yaml.safe_load(f)
+    return doc["zabbix_export"]["templates"]
 
 
 def all_triggers(tpl):
@@ -124,6 +150,35 @@ class TestAgentTemplate(TemplateInvariantsMixin, unittest.TestCase):
 
 class TestAgentWindowsTemplate(TemplateInvariantsMixin, unittest.TestCase):
     filename = "template_ddos_guard_agent_windows.yaml"
+
+
+class TestNoMinOnPerEventCountersAcrossAllTemplates(unittest.TestCase):
+    """Todos os 6 templates do projeto, incluindo os que nao usam macros
+    {$DG.*} (Security Monitoring, Sophos, FortiGate/FortiSwitch, MikroTik)
+    - a checagem de sum() vs min() se aplica a todos, independente de
+    estrutura de macro."""
+
+    def test_no_template_uses_min_on_per_event_counters(self):
+        offenders = []
+        for filename in sorted(os.path.basename(p) for p in glob.glob(os.path.join(TEMPLATES_DIR, "*.yaml"))):
+            for tpl in load_all_templates(filename):
+                for trg in all_triggers(tpl):
+                    expr = trg["expression"]
+                    for key in PER_EVENT_COUNTER_KEYS:
+                        if key in expr and f"min(/{tpl['template']}/{key}" in expr:
+                            offenders.append((filename, tpl["template"], trg["name"], expr))
+        self.assertEqual(
+            offenders, [],
+            f"trigger(s) usando min() sobre item(ns) de evento individual (deveria ser sum()): {offenders}"
+        )
+
+    def test_every_template_file_is_valid_yaml_with_templates(self):
+        files = sorted(glob.glob(os.path.join(TEMPLATES_DIR, "*.yaml")))
+        self.assertGreaterEqual(len(files), 6)
+        for path in files:
+            for tpl in load_all_templates(os.path.basename(path)):
+                self.assertIn("template", tpl)
+                self.assertIn("items", tpl)
 
 
 if __name__ == "__main__":

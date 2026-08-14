@@ -204,7 +204,7 @@ zabbix_export:
         value: mikrotik
       triggers:
       - uuid: 9697f0625edc428abf62058d53278602
-        expression: min(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.HIGH}
+        expression: sum(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.HIGH}
         name: 'MikroTik: Volume critico de bloqueios em {HOST.NAME} (>={$MTK.FIREWALL.BLOCK.HIGH}/min)'
         priority: HIGH
         description: "Firewall do MikroTik bloqueando volume critico de pacotes.\n\
@@ -215,13 +215,13 @@ zabbix_export:
         - tag: scope
           value: security
       - uuid: 17069acbb84e4862882468e5daa49281
-        expression: min(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.WARN}
+        expression: sum(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.WARN}
         name: 'MikroTik: Alto volume de bloqueios em {HOST.NAME} (>={$MTK.FIREWALL.BLOCK.WARN}/min)'
         priority: WARNING
         manual_close: 'YES'
         dependencies:
         - name: 'MikroTik: Volume critico de bloqueios em {HOST.NAME} (>={$MTK.FIREWALL.BLOCK.HIGH}/min)'
-          expression: min(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.HIGH}
+          expression: sum(/DDoS Guard - MikroTik Security/ddosguard.firewall.rate,5m)>={$MTK.FIREWALL.BLOCK.HIGH}
         tags:
         - tag: scope
           value: security
