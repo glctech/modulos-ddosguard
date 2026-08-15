@@ -75,7 +75,7 @@ zabbix_export:
         value: sophos
       triggers:
       - uuid: 4c56cb395f154791b36d653c54c15920
-        expression: min(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.HIGH}
+        expression: sum(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.HIGH}
         name: 'Sophos: Volume crítico de bloqueios em {HOST.NAME} (>={$SOPHOS.FW.BLOCK.HIGH}/min)'
         priority: HIGH
         description: 'O Sophos XG está bloqueando um volume crítico de conexões.
@@ -90,13 +90,13 @@ zabbix_export:
         - tag: scope
           value: security
       - uuid: fbcad26ff73149369a4bbde175098bae
-        expression: min(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.WARN}
+        expression: sum(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.WARN}
         name: 'Sophos: Alto volume de bloqueios em {HOST.NAME} (>={$SOPHOS.FW.BLOCK.WARN}/min)'
         priority: WARNING
         manual_close: 'YES'
         dependencies:
         - name: 'Sophos: Volume crítico de bloqueios em {HOST.NAME} (>={$SOPHOS.FW.BLOCK.HIGH}/min)'
-          expression: min(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.HIGH}
+          expression: sum(/DDoS Guard - Sophos Security/ddosguard.firewall.rate,5m)>={$SOPHOS.FW.BLOCK.HIGH}
         tags:
         - tag: scope
           value: security
@@ -143,7 +143,7 @@ zabbix_export:
         value: sophos
       triggers:
       - uuid: d81405d2d19846caaf425005149b5bc9
-        expression: min(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.HIGH}
+        expression: sum(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.HIGH}
         name: 'Sophos: Volume crítico de detecções IPS em {HOST.NAME}'
         priority: HIGH
         description: 'O IPS do Sophos está detectando um volume crítico de intrusões.
@@ -156,13 +156,13 @@ zabbix_export:
         - tag: scope
           value: security
       - uuid: d6d4b69d02fd4293a6330279d5bde01d
-        expression: min(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.WARN}
+        expression: sum(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.WARN}
         name: 'Sophos: Pico de detecções IPS em {HOST.NAME}'
         priority: WARNING
         manual_close: 'YES'
         dependencies:
         - name: 'Sophos: Volume crítico de detecções IPS em {HOST.NAME}'
-          expression: min(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.HIGH}
+          expression: sum(/DDoS Guard - Sophos Security/ddosguard.attacks.rate,5m)>={$SOPHOS.IPS.HIGH}
         tags:
         - tag: scope
           value: security

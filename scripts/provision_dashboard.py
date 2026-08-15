@@ -53,6 +53,7 @@ Uso:
 """
 
 import argparse
+import getpass
 import json
 import sys
 import urllib.error
@@ -381,7 +382,18 @@ def main():
                  "Gere um token real em: Users -> API tokens -> Create API token\n"
                  "Ou use --user Admin --password SUA_SENHA." % args.token)
 
-    api = ZabbixAPI(args.url, token=args.token, user=args.user, password=args.password)
+    # Se --user foi passado sem --password, pede a senha interativamente
+    # em vez de exigi-la na linha de comando: um argumento de CLI fica
+    # visivel para qualquer usuario local via `ps aux` e costuma ficar
+    # gravado no historico do shell. Nao se aplica a --token (nao e uma
+    # senha reutilizavel da mesma forma) nem quando --password ja foi
+    # informado explicitamente (mantem scripts de automacao existentes
+    # funcionando sem mudanca).
+    password = args.password
+    if args.user and not password and not args.token:
+        password = getpass.getpass("Senha para o usuario '%s': " % args.user)
+
+    api = ZabbixAPI(args.url, token=args.token, user=args.user, password=password)
 
     if not args.skip_module_check:
         print("Verificando modulos...")

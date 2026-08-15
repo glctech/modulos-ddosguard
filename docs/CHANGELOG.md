@@ -1,5 +1,69 @@
 # DDoS Guard — CHANGELOG
 
+## v3.2 — Auditoria completa do repositório (2026-08-14)
+
+Extensão da correção `min()`→`sum()` da v3.1 (que cobriu só os dois
+templates de agente) para **todo o restante do projeto**, mais uma
+melhoria de segurança encontrada na varredura.
+
+### Bug `min()` corrigido nos 4 templates restantes
+
+O mesmo bug da v3.1 — trigger de volume usando `min()` sobre um item
+que o receiver/agente sempre envia como evento individual (valor
+sempre `1`), tornando a trigger praticamente impossível de disparar —
+também existia em:
+
+| Template | Trigger(s) corrigida(s) |
+|---|---|
+| `template_ddos_guard.yaml` (servidor) | Múltiplas detecções de malware (`antivirus.rate`) |
+| `template_ddos_guard_sophos.yaml` | Volume crítico/alto de bloqueios (`firewall.rate`) e de detecções IPS (`attacks.rate`) — 4 triggers |
+| `template_ddos_guard_fortigate.yaml` | Volume crítico de bloqueios FortiGate e violações de segurança FortiSwitch (`firewall.rate`) |
+| `template_ddos_guard_mikrotik.yaml` | Volume crítico/alto de bloqueios (`firewall.rate`) |
+
+`ddosguard.mtk.portscan` e `ddosguard.mtk.bruteforce` (MikroTik) já
+usavam `sum()` corretamente — não precisaram de correção.
+
+`tests/test_templates.py` ganhou uma suíte que varre **todos** os
+templates do diretório (não só os dois de agente) procurando `min()`
+sobre qualquer um dos itens conhecidos por serem eventos individuais
+(`ddosguard.firewall.rate`, `ddosguard.antivirus.rate`,
+`ddosguard.mtk.portscan`, `ddosguard.mtk.bruteforce`) — proteção contra
+o bug voltar a ser introduzido em um template novo ou reimportado.
+
+### Segurança: senha do `provision_dashboard.py` sai da linha de comando
+
+`--password` na CLI fica visível para qualquer usuário local via `ps
+aux` e costuma ficar gravado no histórico do shell — o próprio projeto
+já evita esse padrão no `setup.py` (usa `MYSQL_PWD`/`PGPASSWORD` via
+variável de ambiente), mas o `provision_dashboard.py` não seguia a
+mesma prática para a senha da API do Zabbix.
+
+Corrigido sem quebrar compatibilidade: se `--user` for passado sem
+`--password` (e sem `--token`), o script agora pergunta a senha de
+forma interativa via `getpass` (não ecoa na tela, não fica em
+histórico). Chamadas de automação que já passam `--password`
+explicitamente continuam funcionando exatamente como antes.
+
+### Demais áreas revisadas nesta rodada
+
+Sem achados adicionais que justificassem mudança de código:
+
+- **Views dos 5 widgets de dashboard** — usam a API nativa de
+  construção de HTML do Zabbix (`CDiv`, `CSpan`, `CTableInfo`), que
+  escapa automaticamente todo conteúdo dinâmico (IP, país, nome de
+  malware, etc.) — sem XSS armazenado.
+- **`mikrotik/ddosguard-ccr.rsc`** — ordem das regras de firewall e
+  escada de detecção de port scan/brute force revisadas; nenhuma
+  alteração necessária.
+- **`sql/migration_v2_soc.sql`** — todo o SQL dinâmico é montado a
+  partir de literais fixos (nomes de coluna/tabela do próprio script),
+  sem entrada externa — sem risco de injeção.
+- **Instaladores (`install_agent_linux.sh`, `install_debian_prereqs.sh`
+  etc.)** — sem uso de `curl | bash`, `eval` ou `chmod 777`; senhas de
+  banco já tratadas via variável de ambiente, não argumento de CLI.
+
+---
+
 ## v3.1 — Melhorias na detecção Firewall/Antivírus dos templates de agente (2026-08-14)
 
 Evolução direta da auditoria de 2026-08 (`docs/AUDITORIA_2026-08.md`), nos
