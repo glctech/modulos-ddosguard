@@ -96,6 +96,17 @@ class TestSocOverviewTimeWindowConsistency(unittest.TestCase):
     def test_controller_uses_configurable_time_range_for_alerts(self):
         src = read("DDoSSOCOverview", "actions", "WidgetView.php")
         self.assertIn("fields_values['time_range']", src)
+        # Regressao real de producao: widgets ja existentes no dashboard
+        # (criados antes deste campo existir, ex.: via
+        # provision_dashboard.py com "fields": []) nao tem "time_range"
+        # em $fields_values - sem fallback, isso gera "Undefined array
+        # key" e (int) null vira 0, fazendo toda consulta usar uma
+        # janela de 0 minutos (tudo aparece zerado mesmo com dados reais).
+        self.assertIn(
+            "fields_values['time_range'] ?? self::DEFAULT_TIME_RANGE_MINUTES", src,
+            "time_range precisa de fallback - $fields_values nao contem chaves "
+            "nao salvas explicitamente, mesmo que o campo tenha um default no formulario"
+        )
         # A consulta de alertas precisa referenciar a mesma variável
         # $since usada nos KPIs, não ficar sem filtro de tempo.
         alerts_query_start = src.index("SELECT a.attack_type")
