@@ -1,5 +1,101 @@
 # DDoS Guard — CHANGELOG
 
+## v3.3 — Dashboard SOC: remove dados fabricados, corrige inconsistências (2026-08-15)
+
+Motivado por um print do dashboard "DDoS Guard - Security Operations
+Center" em produção mostrando os KPIs zerados (Eventos 24h, Tentativas,
+Bloqueados, Críticos todos em 0) ao lado de um painel "Alertas
+recentes" com 4 eventos reais de força bruta SSH — uma contradição
+visível para qualquer operador de NOC.
+
+### O achado principal: métricas fabricadas exibidas como reais
+
+O widget `DDoSSOCOverview` tinha um bloco inteiro de UI — "Tempo de
+resposta ao incidente", com as etapas Anomalia → Threshold → Trigger →
+Alerta → **NOC AI** → Mitigação, tempos fixos (T+0s, T+30s, T+32s,
+T+45s, T+2m, T+8m) e as métricas "45s / 8m / 1,57G" — **inteiramente
+hardcoded no PHP**, sem nenhuma ligação com `$data`. Aparecia
+idêntico em toda carga da página, para qualquer host, com ou sem
+ataque em andamento. O estágio "NOC AI" não corresponde a nenhum
+componente real do pipeline.
+
+O widget `DDoSTimeline` ("Response Timeline") tinha o mesmo padrão: as
+métricas MTTD=30s / MTTA=45s / MTTM=8m no cabeçalho eram literais
+fixos, nunca calculados — inclusive quando a lista de incidentes abaixo
+delas estava vazia ("Nenhum incidente nos últimos 7 dias"), o que por
+si só já denunciava a inconsistência.
+
+**Correção:** os dois blocos fabricados foram removidos.
+`DDoSSOCOverview` ganhou uma faixa de status real (baseada no heartbeat
+de cada host: "Monitoramento ativo — N/M hosts íntegros" ou "Atenção —
+N hosts sem heartbeat recente"). `DDoSTimeline` passou a mostrar quatro
+números reais que já eram calculados pela consulta mas nunca exibidos
+(eventos 24h, IPs distintos 24h, pico de tentativas 24h, contagem de
+incidentes 7d) em vez de inventar métricas de tempo de resposta que o
+sistema não tem como medir com confiança (exigiria saber quando o
+ataque *realmente* começou, não só quando foi registrado).
+
+### Bug real: KPIs e "Alertas recentes" usavam janelas de tempo diferentes
+
+Os KPIs do `DDoSSOCOverview` filtravam `created_at >= agora-24h`, mas a
+consulta de "Alertas recentes" não tinha filtro de tempo nenhum — trazia
+sempre os 5 eventos mais recentes de **toda a história** da tabela,
+não das últimas 24h. Em um período sem eventos recentes, os KPIs
+corretamente mostravam 0 enquanto "Alertas recentes" continuava
+exibindo eventos antigos, sem indicar sua idade — exatamente o que o
+print mostrou.
+
+**Correção:** adicionado campo configurável de janela de tempo (1h / 6h
+/ 24h / 7 dias, mesmo padrão já usado em `DDoSAttackMonitor`), aplicado
+de forma idêntica aos KPIs e a "Alertas recentes". O rótulo do painel
+agora mostra a janela ativa ("Alertas recentes (últimas 24h)").
+
+### Bug real: host com agente morto continuava "OK" para sempre
+
+O status de host verificava apenas se o item `ddosguard.agent.heartbeat`
+**já recebeu algum valor alguma vez** — e como esse item só recebe o
+valor `1` (nunca `0`), um host cujo agente parou de enviar heartbeat há
+dias continuava marcado como "OK" indefinidamente. Não havia checagem
+de horário nenhuma, apesar de o próprio heartbeat ter sido desenhado
+justamente para isso (ver v3, "a lição").
+
+**Correção:** a consulta agora busca também o horário (`clock`) do
+último heartbeat; um host só é considerado "OK" se o heartbeat mais
+recente estiver dentro de 15 minutos (mesmo padrão do macro
+`{$DG.HEARTBEAT.TIMEOUT}` dos templates). Hosts com heartbeat velho
+mostram há quanto tempo ("há 3h"), hosts sem heartbeat nunca mostram
+"nunca" — nunca mais "OK" silencioso.
+
+### Métrica removida por ser enganosa: "taxa" de bloqueio
+
+O KPI "Bloqueados" mostrava `bloqueios / eventos × 100` como "taxa",
+mas `ddosguard_blocks` e `ddosguard_attacks` são tabelas alimentadas
+por pipelines diferentes sem relação de cardinalidade garantida — a
+própria documentação já alertava que instalações só-MikroTik nunca
+populam `ddosguard_attacks` (ver `README.md`, "Qual preset usar").
+Nessas instalações a "taxa" seria sempre 0% mesmo com milhares de
+bloqueios reais; em outras poderia passar de 100%. Removida; o card
+agora só mostra a contagem e a janela de tempo, como os demais.
+
+### Filtro por host/grupo agora funcional no SOC Overview
+
+O formulário do widget já tinha campos "Host groups"/"Hosts", mas o
+controller nunca os lia — a seleção não tinha efeito nenhum. Agora os
+quatro KPIs, "Alertas recentes" e o painel de hosts respeitam o filtro,
+igual aos demais widgets do módulo.
+
+### Testes
+
+`tests/test_dashboard_widgets.py` (novo, 8 casos): varre o código-fonte
+dos widgets tocados (não há instância Zabbix disponível neste ambiente
+para executar o framework de UI de verdade) garantindo que os padrões
+de dado fabricado removidos não voltem, que KPIs e alertas usam a mesma
+janela de tempo, que o status de host depende do horário do heartbeat
+e não só do valor, e que a "taxa" enganosa não retorna. `php -l` limpo
+em todo o diretório `modules/`.
+
+---
+
 ## v3.2 — Auditoria completa do repositório (2026-08-14)
 
 Extensão da correção `min()`→`sum()` da v3.1 (que cobriu só os dois

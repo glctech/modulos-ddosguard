@@ -337,6 +337,162 @@ Implementado:    NÃO — mudança de template Zabbix (YAML com UUIDs fixos)
 Rollback:        N/A (não implementado)
 ```
 
+### ACH-08 — Métricas fabricadas exibidas como reais no dashboard SOC
+
+```
+ID:              ACH-08
+Categoria:       correctness / integridade de dados
+Severidade:      CRÍTICO
+Arquivo:         modules/DDoSSOCOverview/views/widget.view.php,
+                 modules/DDoSTimeline/views/widget.view.php
+Componente:      Widgets "SOC Overview" e "Response Timeline"
+Problema:        O bloco "Tempo de resposta ao incidente" do SOC
+                 Overview (etapas Anomalia/Threshold/Trigger/Alerta/
+                 "NOC AI"/Mitigação com tempos T+0s..T+8m, e as
+                 métricas "45s/8m/1,57G") era um array PHP literal,
+                 sem nenhuma referência a $data — aparecia idêntico em
+                 toda carga da página. O Response Timeline tinha o
+                 mesmo padrão nas métricas MTTD=30s/MTTA=45s/MTTM=8m
+                 do cabeçalho. O estágio "NOC AI" não corresponde a
+                 nenhum componente real do pipeline (não existe
+                 automação de IA em lugar nenhum do código).
+Impacto:         Um operador de NOC vendo o dashboard não tem como
+                 distinguir "isso é real" de "isso é decoração" — e
+                 como identificado em produção, os números fixos
+                 continuavam aparecendo mesmo com todos os KPIs reais
+                 zerados e "Nenhum incidente" na lista logo abaixo,
+                 uma contradição visível. Em um dashboard "executivo",
+                 dado fabricado é pior que ausência de dado: passa
+                 confiança indevida.
+Causa:           Placeholder visual criado durante o desenvolvimento
+                 (provavelmente para preencher o layout antes de haver
+                 dados reais de correlação) e nunca substituído por
+                 cálculo real nem removido.
+Recomendação:    Remover todo dado decorativo; substituir por dados
+                 reais quando computável com confiança, ou omitir
+                 honestamente quando não for (MTTD real exigiria saber
+                 quando o ataque começou de fato, não só quando foi
+                 registrado — o sistema não tem essa informação).
+Teste realizado: tests/test_dashboard_widgets.py::TestNoFabricatedDataOnDashboard
+                 — verifica ausência das strings fabricadas específicas
+                 e presença das novas fontes de dado real.
+Resultado:       2/2 OK.
+Implementado:    SIM — timeline fabricada removida e substituída por
+                 uma faixa de status real (heartbeat por host) no SOC
+                 Overview; MTTD/MTTA/MTTM substituídos por 4 números
+                 reais (eventos/IPs/pico/incidentes) já calculados pela
+                 consulta mas nunca exibidos.
+Rollback:        git revert do commit; mudança isolada às views, sem
+                 impacto em schema/API.
+```
+
+### ACH-09 — KPIs e "Alertas recentes" do SOC Overview usavam janelas de tempo diferentes
+
+```
+ID:              ACH-09
+Categoria:       correctness / UX
+Severidade:      ALTO
+Arquivo:         modules/DDoSSOCOverview/actions/WidgetView.php
+Componente:      Widget "SOC Overview"
+Problema:        Os KPIs (Eventos/Tentativas/Bloqueados) filtravam
+                 "created_at >= agora-24h", mas a consulta de "Alertas
+                 recentes" não tinha filtro de tempo algum — trazia
+                 sempre os 5 eventos mais recentes de toda a história
+                 da tabela ddosguard_attacks, não das últimas 24h.
+Impacto:         Reproduzido em produção: KPIs zerados (0 eventos, 0
+                 tentativas) ao lado de 4 alertas de força bruta SSH
+                 visíveis — a inconsistência que motivou esta rodada de
+                 correções. Sem indicação de idade, um operador não
+                 tem como saber se aqueles alertas são de agora ou de
+                 dias atrás.
+Causa:           A consulta de alertas foi escrita antes dos KPIs
+                 ganharem filtro de tempo (ou foi copiada sem o
+                 filtro) e nunca foi alinhada.
+Recomendação:    Aplicar a mesma janela de tempo a ambas as consultas,
+                 e tornar essa janela configurável (como já é em
+                 DDoSAttackMonitor) em vez de fixar 24h.
+Teste realizado: tests/test_dashboard_widgets.py::TestSocOverviewTimeWindowConsistency
+                 — confirma campo time_range no formulário, uso da
+                 mesma variável $since nas duas consultas, e rótulo
+                 dinâmico na view.
+Resultado:       3/3 OK.
+Implementado:    SIM — campo de janela configurável (1h/6h/24h/7d)
+                 aplicado de forma idêntica aos KPIs e a "Alertas
+                 recentes"; filtro por host/grupo (existia no
+                 formulário, nunca era lido pelo controller) também
+                 corrigido.
+Rollback:        git revert do commit.
+```
+
+### ACH-10 — Status de host "OK" não expirava (heartbeat morto ficava invisível)
+
+```
+ID:              ACH-10
+Categoria:       correctness / confiabilidade
+Severidade:      ALTO
+Arquivo:         modules/DDoSSOCOverview/actions/WidgetView.php
+Componente:      Widget "SOC Overview" (painel de hosts)
+Problema:        O status "online" checava apenas se o item
+                 ddosguard.agent.heartbeat já recebeu ALGUM valor em
+                 algum momento — nunca QUANDO. Como esse item só
+                 recebe o valor 1 (nunca 0, ver ingest.php), um host
+                 cujo agente parou de enviar heartbeat há dias
+                 continuava marcado "OK" para sempre.
+Impacto:         Contraria diretamente o propósito documentado do
+                 heartbeat (CHANGELOG v3, "a lição": "um sinal
+                 periódico [...] que transforma silêncio em
+                 informação") — a própria implementação do dashboard
+                 não usava essa informação. Um pipeline morto podia
+                 passar despercebido indefinidamente no painel
+                 "executivo", justamente onde mais importa ser notado.
+Causa:           Consulta buscava hi.value mas não hi.clock (horário
+                 do registro); a checagem de "online" usava só
+                 heartbeat>0.
+Recomendação:    Buscar também o horário do último heartbeat e
+                 considerar "online" somente se estiver dentro de uma
+                 janela de frescor (mesmo padrão de 15min do macro
+                 {$DG.HEARTBEAT.TIMEOUT} dos templates).
+Teste realizado: tests/test_dashboard_widgets.py::TestHostHeartbeatFreshness
+                 — confirma que a consulta busca hi.clock e que a
+                 lógica de status depende da idade calculada.
+Resultado:       1/1 OK.
+Implementado:    SIM — host só é "online" se o heartbeat mais recente
+                 tiver no máximo 15min; caso contrário mostra há
+                 quanto tempo ("há 3h") ou "nunca".
+Rollback:        git revert do commit.
+```
+
+### ACH-11 — KPI "taxa de bloqueio" comparava tabelas sem relação de cardinalidade
+
+```
+ID:              ACH-11
+Categoria:       correctness / UX
+Severidade:      MÉDIO
+Arquivo:         modules/DDoSSOCOverview/actions/WidgetView.php
+Componente:      Widget "SOC Overview" (KPI "Bloqueados")
+Problema:        O KPI calculava bloqueios/eventos×100 como "taxa",
+                 mas ddosguard_blocks e ddosguard_attacks são
+                 alimentadas por pipelines diferentes sem relação de
+                 cardinalidade garantida entre si — o próprio
+                 README já documenta que instalações só-MikroTik nunca
+                 populam ddosguard_attacks.
+Impacto:         Em instalações só-MikroTik a "taxa" seria sempre 0%
+                 mesmo com milhares de bloqueios reais (denominador
+                 zerado); em outras poderia passar de 100%. Um número
+                 sem sentido num card "executivo" mina a confiança no
+                 resto do dashboard.
+Causa:           Métrica derivada criada sem considerar que as duas
+                 tabelas de origem não têm a mesma população de
+                 eventos em todas as topologias de instalação
+                 suportadas.
+Recomendação:    Remover a razão; mostrar cada contagem com sua
+                 própria janela de tempo, como os demais cards.
+Teste realizado: tests/test_dashboard_widgets.py::TestNoMisleadingBlockRate
+Resultado:       1/1 OK.
+Implementado:    SIM.
+Rollback:        git revert do commit.
+```
+
 ---
 
 ## Melhorias implementadas
@@ -346,8 +502,16 @@ Rollback:        N/A (não implementado)
 | 1 | `scripts/ddos_guard_agent.py`: linhas `[UFW ALLOW]` de entrada deixam de ser agregadas/enviadas como ataque; extração do campo `OUT=` corrigida para regex | ACH-01 — eliminar falso positivo em tráfego legítimo | `tests/test_ddos_guard_agent.py` (4 casos novos) | 7/7 testes OK; `python3 -c "import ast; ast.parse(...)"` sem erro de sintaxe |
 | 2 | `scripts/ddos_guard_agent.py`: `IngestClient.send` agora tenta até 3× extra (1s/2s/4s) em falha de rede transitória, sem re-tentar em erro HTTP do servidor | ACH-03 — alinhar código ao comportamento já documentado no CHANGELOG (v2.4.0) | `tests/test_ddos_guard_agent.py` (3 casos novos, com mocks de `urlopen`/`sleep`) | 3/3 OK |
 | 3 | `scripts/integrations/{sophos,suricata,wazuh,syslog,mikrotik}_receiver.php`: comparação de token trocada de `!==` para `hash_equals()` | ACH-02 — eliminar side-channel de timing e alinhar aos 5 receivers com o padrão já usado em `ingest.php` | `php -l` nos 5 arquivos | "No syntax errors detected" nos 5 arquivos |
+| 4 | `modules/DDoSSOCOverview`, `modules/DDoSTimeline` (views): removidas as métricas/timeline de resposta a incidente inteiramente fabricadas, substituídas por dados reais | ACH-08 — dado fabricado apresentado como real num dashboard executivo | `tests/test_dashboard_widgets.py::TestNoFabricatedDataOnDashboard` (2 casos) | 2/2 OK |
+| 5 | `modules/DDoSSOCOverview` (controller + form): janela de tempo configurável aplicada de forma idêntica aos KPIs e a "Alertas recentes"; filtro por host/grupo passou a ser lido | ACH-09 — KPIs e alertas usando janelas de tempo diferentes | `tests/test_dashboard_widgets.py::TestSocOverviewTimeWindowConsistency` (3 casos) | 3/3 OK |
+| 6 | `modules/DDoSSOCOverview` (controller): status de host passa a considerar o horário do último heartbeat, não só se algum valor já foi recebido | ACH-10 — host com agente morto ficava "OK" para sempre | `tests/test_dashboard_widgets.py::TestHostHeartbeatFreshness` (1 caso) | 1/1 OK |
+| 7 | `modules/DDoSSOCOverview` (controller + view): removida a "taxa" bloqueios/eventos do KPI "Bloqueados" | ACH-11 — métrica sem relação de cardinalidade garantida entre as tabelas de origem | `tests/test_dashboard_widgets.py::TestNoMisleadingBlockRate` (1 caso) | 1/1 OK |
 
-Nenhuma tabela, template, trigger ou item existente foi alterado.
+Nenhuma tabela, template, trigger ou item existente foi alterado. Nos
+widgets, a única mudança de schema de configuração é o novo campo
+`time_range` do `DDoSSOCOverview` — opcional, com valor padrão
+equivalente ao comportamento anterior (24h), então dashboards já
+provisionados continuam funcionando sem reconfiguração.
 Nenhuma interface pública (assinatura de função, formato de payload JSON,
 schema de banco) mudou — todas as correções são internas aos arquivos
 tocados.

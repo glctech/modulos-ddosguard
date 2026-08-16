@@ -33,9 +33,18 @@ $style = (new CTag('style', true))->addItem('
 	.dgtl-empty { color: #999; font-size: 10px; padding: 16px; text-align: center; }
 ');
 
-// Stats header
+// Stats header — todos os quatro valores vêm de dados reais (nada
+// decorativo). O sistema não tem, hoje, uma métrica confiável de tempo
+// de detecção/resposta (exigiria saber quando o ataque realmente
+// começou, não só quando foi registrado) — por isso o cabeçalho mostra
+// volume real em vez de inventar um MTTD/MTTA/MTTM.
 $stats_div = (new CDiv())->addClass('dgtl-stats');
-foreach ([['30s','#2fa84f','MTTD'],['45s','#d63939','MTTA'],['8m','#f0a30a','MTTM'],[(int)($stats['total']??0),'#444','24h']] as [$v,$c,$l]) {
+foreach ([
+	[(int) ($stats['total'] ?? 0),   '#d63939', _('Eventos 24h')],
+	[(int) ($stats['ips'] ?? 0),     '#f0a30a', _('IPs 24h')],
+	[(int) ($stats['max_att'] ?? 0), '#4b8cb8', _('Pico tentativas')],
+	[count($incidents),              '#9b59b6', _('Incidentes 7d')],
+] as [$v, $c, $l]) {
 	$stats_div->addItem(
 		(new CDiv())
 			->addClass('dgtl-stat')
