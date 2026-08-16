@@ -24,9 +24,20 @@ class WidgetView extends CControllerDashboardWidgetView {
 	// dos templates (15min).
 	private const HEARTBEAT_STALE_SECONDS = 900;
 
+	// Mesmo valor do ->setDefault() no WidgetForm - usado aqui como
+	// fallback porque $fields_values só contém o que já foi salvo
+	// explicitamente. Widgets criados antes deste campo existir (ex.:
+	// via provision_dashboard.py, que registra "fields": []) não têm
+	// "time_range" na configuração salva, e o default do formulário só
+	// é aplicado na tela de edição — não em $fields_values na renderização.
+	// Sem este fallback, a chave ausente gera "Undefined array key" e
+	// (int) null vira 0, fazendo toda consulta usar uma janela de 0
+	// minutos (tudo aparece zerado, mesmo com eventos reais).
+	private const DEFAULT_TIME_RANGE_MINUTES = 1440;
+
 	protected function doAction(): void {
 		$hostids = $this->getResolvedHostIds();
-		$minutes = (int) $this->fields_values['time_range'];
+		$minutes = (int) ($this->fields_values['time_range'] ?? self::DEFAULT_TIME_RANGE_MINUTES);
 		$since = zbx_dbstr(date('Y-m-d H:i:s', time() - $minutes * 60));
 
 		$host_filter = $hostids ? ' AND hostid IN ('.implode(',', array_map('intval', $hostids)).')' : '';

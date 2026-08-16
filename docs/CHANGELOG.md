@@ -1,5 +1,35 @@
 # DDoS Guard — CHANGELOG
 
+## v3.3.1 — Hotfix: `time_range` sem fallback quebrava o SOC Overview (2026-08-16)
+
+Reportado em produção logo após a v3.3: o widget passou a mostrar
+`Undefined array key "time_range"` no topo do painel, com todos os
+KPIs zerados — inclusive "Alertas recentes" vazio mesmo havendo
+eventos reais.
+
+**Causa:** `$this->fields_values` só contém campos que já foram
+salvos explicitamente na configuração do widget. Instâncias do widget
+criadas **antes** do campo `time_range` existir — inclusive as
+provisionadas por `scripts/provision_dashboard.py`, que registra o
+SOC Overview com `"fields": []` — não têm essa chave, mesmo o
+formulário declarando um valor padrão (`setDefault(1440)`): esse
+padrão só é aplicado na tela de edição do widget, não em
+`$fields_values` durante a renderização. Sem tratamento, a chave
+ausente gerava o warning e `(int) null` virava `0`, fazendo toda
+consulta usar uma janela de **0 minutos** — o inverso do que a v3.3
+pretendia corrigir.
+
+**Correção:** `$this->fields_values['time_range'] ?? self::DEFAULT_TIME_RANGE_MINUTES`
+(1440, mesmo valor do `setDefault()` do formulário). Widgets antigos
+sem o campo salvo voltam a usar 24h, como antes da v3.3; widgets
+configurados explicitamente continuam respeitando a escolha do usuário.
+
+`tests/test_dashboard_widgets.py` ganhou uma asserção que exige esse
+padrão de fallback no código-fonte, para que a lição não se perca se
+o campo for refatorado no futuro.
+
+---
+
 ## v3.3 — Dashboard SOC: remove dados fabricados, corrige inconsistências (2026-08-15)
 
 Motivado por um print do dashboard "DDoS Guard - Security Operations
