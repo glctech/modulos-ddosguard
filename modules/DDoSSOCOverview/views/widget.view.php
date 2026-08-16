@@ -4,10 +4,14 @@
  * @var CView $this
  * @var array $data
  */
-$kpis   = $data['kpis'];
-$alerts = $data['alerts'];
-$hosts  = $data['hosts'];
+$kpis        = $data['kpis'];
+$alerts      = $data['alerts'];
+$hosts       = $data['hosts'];
+$stale_count = $data['stale_count'];
 $sc = ['critical'=>'#d63939','high'=>'#f0a30a','medium'=>'#4b8cb8','low'=>'#2fa84f','info'=>'#999'];
+
+$range_labels = [60=>_('última hora'), 360=>_('últimas 6h'), 1440=>_('últimas 24h'), 10080=>_('últimos 7 dias')];
+$range_label = $range_labels[$data['time_range']] ?? _s('últimos %1$d min', $data['time_range']);
 
 $style = (new CTag('style', true))->addItem('
 	.dgsoc { display: flex; flex-direction: column; gap: 8px; }
@@ -18,31 +22,18 @@ $style = (new CTag('style', true))->addItem('
 		margin-bottom: 3px; letter-spacing: .06em; }
 	.dgsoc-kpi-value { font-size: 22px; font-weight: 700; line-height: 1; }
 	.dgsoc-kpi-sub { font-size: 10px; color: #999; margin-top: 2px; }
-	.dgsoc-tl { background: rgba(128,128,128,.05); border: 1px solid rgba(128,128,128,.12);
-		border-radius: 4px; padding: 8px 12px; }
-	.dgsoc-tl-title { font-size: 10px; font-weight: 700; margin-bottom: 8px; }
-	.dgsoc-tl-track { display: flex; align-items: flex-start; }
-	.dgsoc-tl-step { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; }
-	.dgsoc-tl-step:not(:last-child)::after { content: ""; position: absolute;
-		top: 10px; left: 50%; width: 100%; height: 2px; background: rgba(128,128,128,.2); z-index: 0; }
-	.dgsoc-tl-step.done:not(:last-child)::after { background: #2fa84f; }
-	.dgsoc-tl-circle { width: 20px; height: 20px; border-radius: 50%;
-		display: flex; align-items: center; justify-content: center;
-		font-size: 9px; font-weight: 700; z-index: 1;
-		border: 2px solid #ccc; background: #fff; color: #999; }
-	.dgsoc-tl-step.done .dgsoc-tl-circle { border-color: #2fa84f; background: #e8f5e9; color: #2fa84f; }
-	.dgsoc-tl-step.act  .dgsoc-tl-circle { border-color: #f0a30a; background: #fff8e1; color: #f0a30a; }
-	.dgsoc-tl-name { font-size: 8px; color: #999; margin-top: 3px; text-align: center; line-height: 1.2; }
-	.dgsoc-tl-time { font-size: 9px; font-weight: 700; font-family: monospace; }
-	.dgsoc-tl-metrics { display: flex; gap: 12px; padding-top: 6px;
-		border-top: 1px solid rgba(128,128,128,.1); margin-top: 6px; }
-	.dgsoc-tl-m { display: flex; flex-direction: column; gap: 1px; }
-	.dgsoc-tl-mv { font-size: 13px; font-weight: 700; font-family: monospace; }
-	.dgsoc-tl-mk { font-size: 8px; color: #999; text-transform: uppercase; letter-spacing: .06em; }
+	.dgsoc-status { display: flex; align-items: center; gap: 8px; border-radius: 4px;
+		padding: 8px 12px; border: 1px solid rgba(128,128,128,.12); }
+	.dgsoc-status-ok { background: rgba(47,168,79,.08); border-color: rgba(47,168,79,.3); }
+	.dgsoc-status-warn { background: rgba(214,57,57,.08); border-color: rgba(214,57,57,.3); }
+	.dgsoc-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+	.dgsoc-status-text { font-size: 11px; font-weight: 600; }
+	.dgsoc-status-sub { font-size: 10px; color: #999; margin-left: auto; }
 	.dgsoc-bottom { display: flex; gap: 8px; }
 	.dgsoc-alerts, .dgsoc-hosts { flex: 1; background: rgba(128,128,128,.04);
 		border: 1px solid rgba(128,128,128,.1); border-radius: 4px; padding: 8px 10px; min-height: 60px; }
-	.dgsoc-box-title { font-size: 10px; font-weight: 700; margin-bottom: 6px; }
+	.dgsoc-box-title { font-size: 10px; font-weight: 700; margin-bottom: 6px; color: #999;
+		text-transform: uppercase; letter-spacing: .05em; }
 	.dgsoc-alert-item { display: flex; gap: 6px; padding: 4px 0;
 		border-bottom: 1px solid rgba(128,128,128,.07); align-items: flex-start; }
 	.dgsoc-alert-item:last-child { border-bottom: none; }
@@ -56,15 +47,47 @@ $style = (new CTag('style', true))->addItem('
 	.dgsoc-host-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
 	.dgsoc-host-name { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.dgsoc-host-status { font-size: 9px; color: #999; }
+	.dgsoc-empty { color: #999; font-size: 10px; padding: 6px 0; }
 ');
 
-// KPIs
+// ---------------------------------------------------------------------
+// Status geral do pipeline - único indicador "executivo" no topo:
+// substitui o antigo bloco de timeline decorativo (valores fixos que
+// nunca refletiam o estado real). Aqui, tudo é derivado do heartbeat
+// real dos hosts.
+// ---------------------------------------------------------------------
+$total_hosts = count($hosts);
+$healthy = $total_hosts - $stale_count;
+if ($total_hosts === 0) {
+	$status_class = 'dgsoc-status-warn';
+	$status_text = _('Nenhum host enviando dados ao DDoS Guard');
+	$status_sub = _('Verifique a instalação do agente/integrações');
+}
+elseif ($stale_count === 0) {
+	$status_class = 'dgsoc-status-ok';
+	$status_text = _s('Monitoramento ativo — %1$d/%2$d hosts íntegros', $healthy, $total_hosts);
+	$status_sub = _s('Heartbeat OK em todos os hosts (%1$s)', $range_label);
+}
+else {
+	$status_class = 'dgsoc-status-warn';
+	$status_text = _s('Atenção — %1$d de %2$d hosts sem heartbeat recente', $stale_count, $total_hosts);
+	$status_sub = _('Pipeline pode estar parado nesses hosts — verifique o agente');
+}
+$status_div = (new CDiv())
+	->addClass('dgsoc-status '.$status_class)
+	->addItem((new CDiv())->addClass('dgsoc-status-dot')->addStyle('background:'.($status_class === 'dgsoc-status-ok' ? '#2fa84f' : '#d63939')))
+	->addItem((new CDiv($status_text))->addClass('dgsoc-status-text'))
+	->addItem((new CDiv($status_sub))->addClass('dgsoc-status-sub'));
+
+// KPIs — todos os quatro refletem a mesma janela de tempo configurada
+// no widget (exceto Críticos, que é o estado atual de correlações
+// abertas, não uma contagem por período).
 $kpi_div = (new CDiv())->addClass('dgsoc-kpis');
 foreach ([
-	['Eventos 24h', $kpis['events'],  $kpis['ips'].' IPs distintos',  '#d63939'],
-	['Tentativas',  number_format((int)$kpis['attempts'],0,',','.'), 'ultimas 24h', '#f0a30a'],
-	['Bloqueados',  number_format((int)$kpis['blocks'],0,',','.'),   $kpis['rate'].'% taxa', '#2fa84f'],
-	['Criticos',    $kpis['critical'], 'score >= 7',                  '#9b59b6'],
+	['Eventos', $kpis['events'], $kpis['ips'].' '._('IPs distintos').' - '.$range_label, '#d63939'],
+	['Tentativas', number_format((int) $kpis['attempts'], 0, ',', '.'), $range_label, '#f0a30a'],
+	['Bloqueados', number_format((int) $kpis['blocks'], 0, ',', '.'), $range_label, '#2fa84f'],
+	['Críticos', $kpis['critical'], _('correlações abertas, score >= 7'), '#9b59b6'],
 ] as [$lbl, $val, $sub, $color]) {
 	$kpi_div->addItem(
 		(new CDiv())
@@ -76,42 +99,9 @@ foreach ([
 	);
 }
 
-// Timeline
-$tl_track = (new CDiv())->addClass('dgsoc-tl-track');
-foreach ([
-	['done','v','Anomalia', 'T+0s', '#2fa84f'],
-	['done','v','Threshold','T+30s','#2fa84f'],
-	['done','v','Trigger',  'T+32s','#2fa84f'],
-	['done','!','Alerta',   'T+45s','#d63939'],
-	['done','v','NOC AI',   'T+2m', '#2fa84f'],
-	['act', '>','Mitigacao','T+8m', '#f0a30a'],
-] as [$cls, $icon, $name, $time, $color]) {
-	$tl_track->addItem(
-		(new CDiv())
-			->addClass("dgsoc-tl-step $cls")
-			->addItem((new CDiv($icon))->addClass('dgsoc-tl-circle'))
-			->addItem((new CDiv($name))->addClass('dgsoc-tl-name'))
-			->addItem((new CDiv($time))->addClass('dgsoc-tl-time')->addStyle("color:$color"))
-	);
-}
-$tl_metrics = (new CDiv())->addClass('dgsoc-tl-metrics');
-foreach ([['45s','#2fa84f','Anomalia->Alerta'],['8m','#f0a30a','->Mitigacao'],['1.57G','#d63939','Pico']] as [$v,$c,$l]) {
-	$tl_metrics->addItem(
-		(new CDiv())
-			->addClass('dgsoc-tl-m')
-			->addItem((new CDiv($v))->addClass('dgsoc-tl-mv')->addStyle("color:$c"))
-			->addItem((new CDiv($l))->addClass('dgsoc-tl-mk'))
-	);
-}
-$timeline = (new CDiv())
-	->addClass('dgsoc-tl')
-	->addItem((new CDiv('Tempo de resposta ao incidente'))->addClass('dgsoc-tl-title'))
-	->addItem($tl_track)
-	->addItem($tl_metrics);
-
 // Alertas
 $alerts_box = (new CDiv())->addClass('dgsoc-alerts')
-	->addItem((new CDiv(_('Alertas recentes')))->addClass('dgsoc-box-title'));
+	->addItem((new CDiv(_s('Alertas recentes (%1$s)', $range_label)))->addClass('dgsoc-box-title'));
 if ($alerts) {
 	foreach (array_slice($alerts, 0, 4) as $a) {
 		$color = $sc[$a['severity_label'] ?? 'info'] ?? '#999';
@@ -122,14 +112,15 @@ if ($alerts) {
 				->addItem(
 					(new CDiv())
 						->addStyle('flex:1;min-width:0')
-						->addItem((new CDiv(htmlspecialchars(str_replace('_',' ',$a['attack_type']??''))))->addClass('dgsoc-alert-type'))
-						->addItem((new CDiv(htmlspecialchars($a['src_ip']??'').' - '.htmlspecialchars($a['host']??'')))->addClass('dgsoc-alert-meta'))
+						->addItem((new CDiv(htmlspecialchars(str_replace('_', ' ', $a['attack_type'] ?? ''))))->addClass('dgsoc-alert-type'))
+						->addItem((new CDiv(htmlspecialchars($a['src_ip'] ?? '').' - '.htmlspecialchars($a['host'] ?? '')))->addClass('dgsoc-alert-meta'))
 				)
-				->addItem((new CDiv(date('H:i',strtotime($a['last_seen']??'now'))))->addClass('dgsoc-alert-time'))
+				->addItem((new CDiv(date('H:i', strtotime($a['last_seen'] ?? 'now'))))->addClass('dgsoc-alert-time'))
 		);
 	}
-} else {
-	$alerts_box->addItem((new CDiv(_('Nenhum alerta recente')))->addStyle('color:#999;font-size:10px;padding:6px 0'));
+}
+else {
+	$alerts_box->addItem((new CDiv(_s('Nenhum evento nas %1$s', $range_label)))->addClass('dgsoc-empty'));
 }
 
 // Hosts
@@ -137,22 +128,34 @@ $hosts_box = (new CDiv())->addClass('dgsoc-hosts')
 	->addItem((new CDiv(_('Hosts').' ('.count($hosts).')'))->addClass('dgsoc-box-title'));
 if ($hosts) {
 	foreach (array_slice($hosts, 0, 5) as $h) {
-		$online = (int)($h['status']??1)===0 && ($h['heartbeat']??0)>0;
+		if ($h['online']) {
+			$status_label = _('OK');
+		}
+		elseif ($h['last_heartbeat'] > 0) {
+			$mins = (int) round($h['age_seconds'] / 60);
+			$status_label = $mins < 60
+				? _s('há %1$dmin', $mins)
+				: _s('há %1$dh', (int) round($mins / 60));
+		}
+		else {
+			$status_label = _('nunca');
+		}
 		$hosts_box->addItem(
 			(new CDiv())
 				->addClass('dgsoc-host-item')
-				->addItem((new CDiv())->addClass('dgsoc-host-dot')->addStyle('background:'.($online?'#2fa84f':'#d63939')))
-				->addItem((new CDiv(htmlspecialchars($h['host']??'')))->addClass('dgsoc-host-name'))
-				->addItem((new CDiv($online?'OK':'Off'))->addClass('dgsoc-host-status'))
+				->addItem((new CDiv())->addClass('dgsoc-host-dot')->addStyle('background:'.($h['online'] ? '#2fa84f' : '#d63939')))
+				->addItem((new CDiv(htmlspecialchars($h['host'] ?? '')))->addClass('dgsoc-host-name'))
+				->addItem((new CDiv($status_label))->addClass('dgsoc-host-status'))
 		);
 	}
-} else {
-	$hosts_box->addItem((new CDiv(_('Nenhum host encontrado')))->addStyle('color:#999;font-size:10px'));
+}
+else {
+	$hosts_box->addItem((new CDiv(_('Nenhum host encontrado')))->addClass('dgsoc-empty'));
 }
 
 (new CWidgetView($data))
 	->addItem($style)
+	->addItem($status_div)
 	->addItem($kpi_div)
-	->addItem($timeline)
 	->addItem((new CDiv())->addClass('dgsoc-bottom')->addItem($alerts_box)->addItem($hosts_box))
 	->show();

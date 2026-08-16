@@ -155,7 +155,29 @@ integrações, templates, banco de dados, segurança, performance e
 interface). Relatório completo em
 [`docs/AUDITORIA_2026-08.md`](docs/AUDITORIA_2026-08.md); histórico
 detalhado de cada mudança em [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
-(v3.1 e v3.2).
+(v3.1 a v3.3).
+
+**Dashboard SOC — métricas fabricadas removidas.** O widget "SOC
+Overview" exibia um bloco de "Tempo de resposta ao incidente"
+(Anomalia → Threshold → Trigger → Alerta → "NOC AI" → Mitigação, com
+tempos e métricas fixos) **inteiramente hardcoded**, sem nenhuma
+relação com dados reais — aparecia idêntico em toda carga da página. O
+widget "Response Timeline" tinha o mesmo problema com as métricas
+MTTD/MTTA/MTTM. Ambos removidos; substituídos por dados reais (status
+de heartbeat por host, volume real de eventos/IPs/incidentes).
+
+**Dashboard SOC — KPIs e "Alertas recentes" agora usam a mesma janela
+de tempo.** Antes, os KPIs filtravam por 24h mas "Alertas recentes" não
+tinha filtro de tempo nenhum — podia mostrar eventos antigos ao lado de
+KPIs zerados, como aconteceu em produção. Corrigido com um campo de
+janela configurável (1h/6h/24h/7d) aplicado de forma consistente, mais
+filtro por host/grupo (existia no formulário mas nunca era lido).
+
+**Dashboard SOC — host com agente morto não fica mais marcado como
+"OK".** O status dependia só de o item de heartbeat já ter recebido
+algum valor alguma vez, nunca de quando — um agente parado há dias
+continuava aparecendo saudável. Corrigido para checar o horário do
+último heartbeat (mesmo padrão de 15min dos templates).
 
 **Detecção — bug corrigido em todos os 6 templates.** As triggers de
 volume de firewall/antivírus (`ddosguard.firewall.rate`,
@@ -202,7 +224,8 @@ agente coletor para falhas de rede transitórias no envio de eventos —
 antes um evento era perdido silenciosamente na primeira falha.
 
 **Testes automatizados novos.** `tests/test_ddos_guard_agent.py` (7
-casos) e `tests/test_templates.py` (16 casos, cobrindo os 6 templates)
+casos), `tests/test_templates.py` (16 casos, cobrindo os 6 templates) e
+`tests/test_dashboard_widgets.py` (8 casos, widgets de dashboard)
 protegem essas correções contra regressão.
 
 ## Estrutura do pacote
